@@ -1,0 +1,85 @@
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from .. import models
+from ..auth_utils import get_current_user
+from ..core.settings import get_settings
+from ..database import get_db
+from ..services.agent_service import run_agent
+
+router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+class AgentRequest(BaseModel):
+    request: str
+
+
+def _load_profile(db: Session, user_id: int) -> dict:
+    """The user's profile fields, falling back to the configured defaults."""
+    settings = get_settings()
+    row = db.query(models.ProfileConfig).filter(models.ProfileConfig.user_id == user_id).first()
+    return {
+        "field": row.field if row and row.field else settings.default_field,
+        "skills": row.skills if row and row.skills else settings.default_skills,
+        "level": row.level if row and row.level else settings.default_level,
+    }
+
+
+@router.post("/ask")
+async def ask(
+    payload: AgentRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+):
+    profile = _load_profile(db, current_user.id)
+
+    # Historique récent (6 derniers messages, dans l'ordre chronologique)
+    recent = (
+        db.query(models.AgentMessage)
+        .filter(models.AgentMessage.user_id == current_user.id)
+        .order_by(models.AgentMessage.created_at.desc())
+        .limit(6)
+        .all()
+    )
+    history = list(reversed(recent))
+
+    result = await run_agent(payload.request, profile, history)
+
+    # Sauvegarde de l'échange
+    db.add(models.AgentMessage(user_id=current_user.id, role="user", content=payload.request))
+    db.add(models.AgentMessage(user_id=current_user.id, role="assistant", content=result["answer"]))
+
+    # Action : le post généré va directement dans la file d'attente en brouillon
+    post_saved = False
+    if result["post_text"]:
+        db.add(
+            models.ContentQueue(
+                user_id=current_user.id,
+                source="agent",
+                title=payload.request[:80],
+                post_text=result["post_text"],
+                status="draft",
+            )
+        )
+        post_saved = True
+
+    db.commit()
+    result["post_saved"] = post_saved
+    return result
+
+
+@router.get("/history")
+def get_history(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    msgs = (
+        db.query(models.AgentMessage)
+        .filter(models.AgentMessage.user_id == current_user.id)
+        .order_by(models.AgentMessage.created_at.asc())
+        .all()
+    )
+    return [{"role": m.role, "content": m.content} for m in msgs]
+
+
+@router.delete("/history")
+def clear_history(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    db.query(models.AgentMessage).filter(models.AgentMessage.user_id == current_user.id).delete()
+    db.commit()
+    return {"status": "cleared"}

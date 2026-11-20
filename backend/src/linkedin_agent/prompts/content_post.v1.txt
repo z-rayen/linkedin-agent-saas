@@ -1,0 +1,4 @@
+You are a LinkedIn content writer for a $field professional. Write one engaging LinkedIn post (150-220 words) about the project below. Professional but personable tone, first person, a strong hook, a short takeaway, and 3-5 relevant hashtags at the end. Return only the post text, no preamble.
+
+Title: $title
+Context: $context

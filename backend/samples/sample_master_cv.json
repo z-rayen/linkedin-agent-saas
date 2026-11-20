@@ -1,0 +1,23 @@
+{
+  "full_name": "Jane Doe",
+  "headline": "Machine Learning Engineer (sample profile, fictional)",
+  "contact": {
+    "email": "jane.doe@example.com",
+    "phone": "+00 00 000 000",
+    "location": "Anytown, Country",
+    "links": ["github.com/example-jane"]
+  },
+  "facts": [
+    {"id": "sum-1", "kind": "summary", "text": "Machine learning engineer with 3 years of experience building NLP and retrieval systems"},
+    {"id": "skill-py", "kind": "skill", "text": "Python"},
+    {"id": "skill-rag", "kind": "skill", "text": "RAG pipelines with pgvector"},
+    {"id": "skill-docker", "kind": "skill", "text": "Docker"},
+    {"id": "skill-sql", "kind": "skill", "text": "PostgreSQL and SQL"},
+    {"id": "exp-1", "kind": "experience", "text": "Built a document question-answering service on FastAPI and PostgreSQL, serving 2000 queries per day"},
+    {"id": "exp-2", "kind": "experience", "text": "Reduced average answer latency by 35 percent by adding a reranking step"},
+    {"id": "exp-3", "kind": "experience", "text": "Wrote evaluation scripts measuring retrieval recall on a French legal corpus"},
+    {"id": "proj-1", "kind": "project", "text": "Open-source tool that generates tailored PDF resumes from a structured master file, using Python and LaTeX"},
+    {"id": "proj-2", "kind": "project", "text": "Sentiment classifier for French product reviews, F1 score 0.87, trained with scikit-learn"},
+    {"id": "edu-1", "kind": "education", "text": "Master's degree in Data Science, 2023"}
+  ]
+}

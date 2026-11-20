@@ -1,0 +1,51 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/data/private/
+# Private user data (real CVs, personal knowledge base, generated PDFs)
+data/private/
+*.pdf
+!docs/**/*.pdf
+!backend/tests/fixtures/**/*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Node (frontend, from phase 3)
+node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Databases and volumes
+*.db
+*.sqlite3
+pgdata/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.fdb_latexmk
+*.fls
+*.synctex.gz

@@ -1,0 +1,231 @@
+"""Applications API. Each step (prepare, approve, send) is checked server-side; the UI cannot skip one."""
+
+from typing import Any, Literal
+
+from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import Response
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.orm import Session
+
+from .. import models
+from ..auth_utils import get_current_user
+from ..clock import utcnow
+from ..core.exceptions import NotFoundError, http_error
+from ..core.settings import get_settings
+from ..cv.models import MasterCV, TailoredLine
+from ..database import get_db
+from ..infra.mail import Mailer, get_mailer
+from ..services import applications as service
+from ..services import preparations
+
+router = APIRouter(prefix="/applications", tags=["applications"])
+
+
+class ApplicationCreate(BaseModel):
+    job_title: str = Field(min_length=1, max_length=200)
+    job_text: str | None = Field(default=None, max_length=20000)
+    job_url: str | None = Field(default=None, max_length=2000)
+    recipient_email: EmailStr
+    company: str | None = Field(default=None, max_length=200)
+
+
+class ApplicationEdit(BaseModel):
+    """Any field can change. Changing anything after approval sends the application back to prepared."""
+
+    subject: str | None = Field(default=None, min_length=1, max_length=300)
+    body: str | None = Field(default=None, min_length=1, max_length=10000)
+    recipient_email: EmailStr | None = None
+    cv_lines: list[TailoredLine] | None = Field(default=None, min_length=1)
+
+
+class SendRequest(BaseModel):
+    """Required for a real send: the recipient address typed again, so a stray click cannot send."""
+
+    confirm_recipient: EmailStr | None = None
+
+
+class ResolveRequest(BaseModel):
+    """Manual decision on a send stuck in "sending". Check the mailbox and the SMTP log before choosing."""
+
+    outcome: Literal["sent", "failed"]
+    note: str = Field(min_length=1, max_length=500)
+
+
+def _out(application: models.Application) -> dict[str, Any]:
+    cv = service.tailored_cv_of(application)
+    return {
+        "id": application.id,
+        "status": service.display_status(application, utcnow()),
+        "company": application.company,
+        "company_key": application.company_key,
+        "job_title": application.job_title,
+        "recipient_email": application.recipient_email,
+        "subject": application.subject,
+        "body": application.body,
+        "grounding_problems": service.problems_of(application),
+        "cv_lines": [line.model_dump() for line in cv.lines] if cv else [],
+        "has_pdf": application.cv_pdf is not None,
+        "pdf_sha256": application.cv_pdf_sha256,
+        "smtp_message_id": application.smtp_message_id,
+        "last_error": application.last_error,
+        "created_at": application.created_at,
+        "approved_at": application.approved_at,
+        "sending_started_at": application.sending_started_at,
+        "sent_at": application.sent_at,
+    }
+
+
+def _owned(db: Session, user: models.User, application_id: int) -> models.Application:
+    application = (
+        db.query(models.Application)
+        .filter(models.Application.id == application_id, models.Application.user_id == user.id)
+        .first()
+    )
+    if application is None:
+        raise http_error(NotFoundError("Application not found"))
+    return application
+
+
+@router.put("/master-cv")
+def put_master_cv(
+    master: MasterCV,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, object]:
+    service.save_master_cv(db, current_user.id, master)
+    return {"status": "saved", "facts": len(master.facts)}
+
+
+@router.post("", status_code=202)
+async def create_application(
+    payload: ApplicationCreate,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Start a preparation in the background. Poll GET /applications/preparations/{run_id} for progress."""
+    run = preparations.start(db, current_user.id, payload.model_dump())
+    background.add_task(preparations.execute, run.id)
+    return preparations.status_of(run, utcnow(), get_settings().preparation_stale_seconds)
+
+
+@router.get("/preparations/{run_id}")
+def get_preparation(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, Any]:
+    run = (
+        db.query(models.PreparationRun)
+        .filter(models.PreparationRun.id == run_id, models.PreparationRun.user_id == current_user.id)
+        .first()
+    )
+    if run is None:
+        raise http_error(NotFoundError("Preparation not found"))
+    return preparations.status_of(run, utcnow(), get_settings().preparation_stale_seconds)
+
+
+@router.get("")
+def list_applications(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    rows = (
+        db.query(models.Application)
+        .filter(models.Application.user_id == current_user.id)
+        .order_by(models.Application.created_at.desc())
+        .all()
+    )
+    return [_out(row) for row in rows]
+
+
+@router.get("/{application_id}")
+def get_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, Any]:
+    return _out(_owned(db, current_user, application_id))
+
+
+@router.get("/{application_id}/cv.pdf")
+def preview_pdf(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Response:
+    """The frozen PDF: the same bytes that are attached when the application is sent."""
+    pdf = service.frozen_pdf(_owned(db, current_user, application_id))
+    if pdf is None:
+        raise http_error(NotFoundError("No PDF for this application"))
+    return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/{application_id}/approve")
+def approve_application(
+    application_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """The approval gate. It is complete on its own; resuming the graph afterwards only closes its workflow record."""
+    application = service.approve(db, _owned(db, current_user, application_id))
+    review = (
+        db.query(models.PreparationRun)
+        .filter(
+            models.PreparationRun.application_id == application.id,
+            models.PreparationRun.status == "awaiting_review",
+        )
+        .first()
+    )
+    if review is not None:
+        background.add_task(preparations.resume_after_approval, review.id)
+    return _out(application)
+
+
+@router.patch("/{application_id}")
+def edit_application(
+    application_id: int,
+    payload: ApplicationEdit,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, Any]:
+    application = service.edit(
+        db,
+        _owned(db, current_user, application_id),
+        subject=payload.subject,
+        body=payload.body,
+        recipient_email=payload.recipient_email,
+        cv_lines=payload.cv_lines,
+    )
+    return _out(application)
+
+
+@router.post("/{application_id}/send")
+async def send_application(
+    application_id: int,
+    payload: SendRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+    mailer: Mailer = Depends(get_mailer),
+) -> dict[str, object]:
+    application = _owned(db, current_user, application_id)
+    confirm = str(payload.confirm_recipient) if payload and payload.confirm_recipient else None
+    return await service.send(db, application, mailer, utcnow(), confirm_recipient=confirm)
+
+
+@router.post("/{application_id}/resolve")
+def resolve_application(
+    application_id: int,
+    payload: ResolveRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, Any]:
+    application = service.resolve(
+        db,
+        _owned(db, current_user, application_id),
+        outcome=payload.outcome,
+        note=payload.note,
+        now=utcnow(),
+    )
+    return _out(application)

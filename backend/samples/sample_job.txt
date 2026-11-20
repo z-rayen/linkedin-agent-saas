@@ -1,0 +1,5 @@
+Machine Learning Intern (6 months, Paris)
+
+We are looking for an intern to help build our retrieval-augmented question answering platform.
+You will work with Python and FastAPI, improve our retrieval pipeline (embeddings, reranking) and
+write evaluation scripts. Experience with PostgreSQL, Docker and French-language data is a plus.

@@ -1,0 +1,93 @@
+[project]
+name = "linkedin-agent"
+version = "0.1.0"
+description = "Self-hosted LinkedIn agent: job watch, research agent, assisted engagement."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.129,<0.130",
+    "uvicorn>=0.41,<0.42",
+    "sqlalchemy>=2.0.43,<2.1",
+    "alembic>=1.13,<2",
+    "psycopg2-binary>=2.9.13,<2.10",
+    "pgvector>=0.5.0,<0.6",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.12,<3",
+    "email-validator>=2.3,<3",
+    "python-dotenv>=1.0,<2",
+    "python-jose>=3.5,<4",
+    "passlib>=1.7.4,<1.8",
+    "bcrypt==4.1.2",
+    "cryptography>=43,<50",
+    "httpx>=0.28.1,<0.29",
+    "beautifulsoup4>=4.13,<5",
+    "fastembed>=0.9.1,<0.10",
+    # IANA timezone database: zoneinfo has no data on Windows without it (daily caps use Africa/Tunis).
+    "tzdata>=2024.1",
+    # Phase 2 orchestration. Exact pins: the checkpoint schema is tied to the checkpointer version (see tests).
+    "langgraph==1.2.24",
+    "langgraph-checkpoint-postgres==3.2.1",
+    "psycopg[binary]==3.3.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<9",
+    "pytest-cov>=6,<7",
+    "ruff>=0.12,<0.13",
+    "mypy>=1.17,<2",
+]
+
+[tool.uv]
+# Virtual project: the app is run from this folder, not installed as a package (yet).
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/linkedin_agent"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 75  # measured 81.5% on the Phase 0 suite; keep a margin so unrelated changes do not break CI
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "B008"]  # French accents are intentional; B008 is FastAPI Depends() in defaults
+
+[tool.ruff.lint.per-file-ignores]
+# Test fixtures are data: long sample sentences are clearer on one line than split across strings.
+"tests/**" = ["B017", "E501"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src/linkedin_agent"]
+strict = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+
+# Legacy modules from the prototype. They are typed in Phase 2-3 when they are rewritten
+# (SQLAlchemy Column typing, untyped route handlers, bare dict annotations). Everything else
+# (core, infra, domain, prompts, clock, auth_utils) is checked in full strict mode.
+[[tool.mypy.overrides]]
+module = [
+    "linkedin_agent.models",
+    "linkedin_agent.routers.*",
+    "linkedin_agent.services.*",
+    "linkedin_agent.main",
+    "linkedin_agent.schemas",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+disallow_untyped_calls = false
+warn_return_any = false
+disable_error_code = ["arg-type", "assignment", "misc", "no-untyped-call", "attr-defined"]

@@ -1,0 +1,36 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: linkedin-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: linkedin
+      # Required. Set it in a root .env file next to this compose file, or in your shell.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD (root .env or shell)}
+      POSTGRES_DB: linkedin_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkedin -d linkedin_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Secrets come from backend/.env. The database host is overridden: inside the network it is "db", not localhost.
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://linkedin:${POSTGRES_PASSWORD}@db:5432/linkedin_agent
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

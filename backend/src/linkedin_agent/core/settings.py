@@ -1,0 +1,188 @@
+"""Typed application settings, loaded from environment variables and an optional .env file.
+
+Environment variable names match the ones already used by the prototype, so an
+existing backend/.env keeps working. Secrets have no default: the app refuses to
+start without them. Non-secret tuning values have defaults, so they can be
+overridden per deployment without touching code.
+"""
+
+import os
+from functools import lru_cache
+from urllib.parse import urlsplit
+
+from cryptography.fernet import Fernet
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    # Tests set LINKEDIN_AGENT_NO_ENV_FILE=1 before any import, so backend/.env is never read in tests.
+    model_config = SettingsConfigDict(
+        env_file=None if os.environ.get("LINKEDIN_AGENT_NO_ENV_FILE") == "1" else ".env",
+        extra="ignore",
+    )
+
+    # Infrastructure
+    database_url: str
+    # The one variable that names the frontend: CORS allowlist and OAuth redirects both use it. Origin only, no path.
+    frontend_origin: str = "http://localhost:5500"
+    log_level: str = "INFO"
+
+    # Authentication
+    secret_key: str = Field(min_length=16)
+    # Fernet key that encrypts OAuth tokens at rest (cryptography.fernet.Fernet.generate_key()).
+    token_encryption_key: str
+    jwt_algorithm: str = "HS256"
+    # bcrypt cost factor. 12 is the production default; tests lower it, because hashing is intentionally slow.
+    bcrypt_rounds: int = 12
+    access_token_expire_minutes: int = 60 * 24 * 7
+    oauth_state_expire_minutes: int = 10
+
+    # LLM (Groq, OpenAI-compatible)
+    groq_api_key: str = ""
+    groq_url: str = "https://api.groq.com/openai/v1/chat/completions"
+    groq_model: str = "openai/gpt-oss-20b"
+    groq_timeout_seconds: float = 30.0
+    groq_max_retries: int = 2
+    groq_retry_wait_seconds: float = 8.0
+    # Pause between consecutive LLM calls in one request, to stay under the free-tier tokens/minute quota.
+    llm_min_interval_seconds: float = 2.0
+    # Shared token budget per process (Groq free tier is about 8000 tokens per minute). Per process, not per cluster.
+    llm_tokens_per_minute: int = 8000
+    # Reserved for each completion, and the cap sent to the provider. The reservation is corrected with real usage.
+    llm_max_output_tokens: int = 1024
+    # Grounding revisions per preparation: the graph feeds the exact problems back this many times at most.
+    graph_max_revisions: int = 2
+    # A preparation whose heartbeat is older than this is considered interrupted (see services/preparations.py).
+    preparation_stale_seconds: float = 300.0
+    # Checkpointer connection (LangGraph Postgres). Empty means: DATABASE_URL with the +psycopg2 driver suffix removed.
+    checkpoint_database_url: SecretStr = SecretStr("")
+    # Local embedding model (384 dimensions, FR/EN). Must match the Vector(384) column.
+    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+    # Default profile, used until the user saves their own.
+    default_field: str = "Machine Learning, Data Science"
+    default_skills: str = "Python, TensorFlow, NLP, MLOps, AWS, SQL"
+    default_level: str = "Student / Junior"
+    default_min_match_score: int = 70
+    default_job_feed_url: str = "https://weworkremotely.com/categories/remote-data-science-jobs.rss"
+    default_cert_feed_url: str = "https://aws.amazon.com/blogs/training-and-certification/feed/"
+
+    # Web search (Serper.dev)
+    serper_api_key: str = ""
+    serper_url: str = "https://google.serper.dev/search"
+    serper_timeout_seconds: float = 20.0
+
+    # LinkedIn OAuth app
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    linkedin_redirect_uri: str = ""
+
+    # GitHub OAuth app
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_redirect_uri: str = ""
+
+    # Email sending. Dry-run is ON by default: nothing leaves the machine until you turn it off.
+    mail_dry_run: bool = True
+    mail_daily_cap: int = 10
+    mail_min_delay_seconds: float = 300.0
+    mail_follow_up_after_days: int = 7
+    # No second application to the same company (domain-based key) within this many days of a send.
+    mail_company_cooldown_days: int = 30
+    # Calendar used for the daily cap. Caps reset at local midnight in this timezone.
+    mail_timezone: str = "Africa/Tunis"
+    # When set, every real message goes to this address instead of the recipient (end-to-end tests on yourself).
+    mail_redirect_to: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: SecretStr = SecretStr("")
+    smtp_from_address: str = ""
+    # TLS is mandatory: plaintext SMTP is refused. Port 465 uses implicit TLS, other ports require STARTTLS.
+    smtp_timeout_seconds: float = 20.0
+    smtp_use_starttls: bool = True
+    # A send stuck in "sending" longer than this is shown as "needs verification" and is never retried automatically.
+    mail_sending_timeout_seconds: float = 900.0
+    # Real recipients need an explicit opt-in. Dry-run off alone is refused (see the validator below).
+    mail_allow_real_recipients: bool = False
+    # Free-mail providers say nothing about the employer: their domain must not identify a company.
+    # Entries ending in ".*" match any suffix (yahoo.*, gmx.* ...). JSON list in the environment.
+    free_mail_domains: list[str] = [
+        "gmail.com",
+        "googlemail.com",
+        "outlook.com",
+        "outlook.fr",
+        "hotmail.com",
+        "hotmail.fr",
+        "live.com",
+        "live.fr",
+        "msn.com",
+        "yahoo.*",
+        "ymail.com",
+        "aol.com",
+        "icloud.com",
+        "me.com",
+        "proton.me",
+        "protonmail.com",
+        "gmx.*",
+        "orange.fr",
+        "free.fr",
+        "laposte.net",
+        "wanadoo.fr",
+        "sfr.fr",
+    ]
+
+    # LaTeX compiler for tailored CVs (Tectonic single binary). Empty means: look on PATH.
+    tectonic_path: str = ""
+    tectonic_timeout_seconds: float = 180.0
+    # Personal files (real master CV, generated PDFs). Gitignored: never commit this folder.
+    private_data_dir: str = "data/private"
+
+    @model_validator(mode="after")
+    def real_sending_needs_a_target(self) -> "Settings":
+        """Turning dry-run off must never reach real recipients by accident.
+
+        Real sending requires either a redirect (every message goes to a test address) or an explicit opt-in
+        to real recipients. Otherwise the application refuses to start.
+        """
+        if not self.mail_dry_run and not self.mail_redirect_to.strip() and not self.mail_allow_real_recipients:
+            raise ValueError(
+                "MAIL_DRY_RUN=false requires MAIL_REDIRECT_TO (test address) "
+                "or MAIL_ALLOW_REAL_RECIPIENTS=true (explicit opt-in to real recipients)"
+            )
+        return self
+
+    @field_validator("frontend_origin")
+    @classmethod
+    def must_be_a_bare_origin(cls, value: str) -> str:
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.hostname or parts.path not in ("", "/"):
+            raise ValueError("FRONTEND_ORIGIN must be an origin such as http://localhost:5173 (no path)")
+        return f"{parts.scheme}://{parts.netloc}"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [self.frontend_origin]
+
+    def checkpoint_url(self) -> str:
+        """The connection string for the LangGraph checkpointer (psycopg v3 reads the plain postgresql:// form)."""
+        explicit = self.checkpoint_database_url.get_secret_value().strip()
+        if explicit:
+            return explicit
+        return self.database_url.replace("postgresql+psycopg2://", "postgresql://", 1)
+
+    @field_validator("token_encryption_key")
+    @classmethod
+    def must_be_a_fernet_key(cls, value: str) -> str:
+        try:
+            Fernet(value.encode())
+        except (ValueError, TypeError) as exc:
+            raise ValueError("TOKEN_ENCRYPTION_KEY must be a valid Fernet key") from exc
+        return value
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the process-wide settings. Cached: environment changes after the first call are ignored."""
+    return Settings()
