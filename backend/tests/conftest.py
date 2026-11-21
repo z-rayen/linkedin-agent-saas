@@ -57,6 +57,10 @@ os.environ["SMTP_HOST"] = ""
 # No artificial pauses in tests: they exist to respect the real Groq quota, not to be tested.
 os.environ["LLM_MIN_INTERVAL_SECONDS"] = "0"
 os.environ["GROQ_RETRY_WAIT_SECONDS"] = "0"
+# Unit tests keep the workflow checkpoints in memory. The Postgres checkpointer has its own tests (marker: integration).
+os.environ["CHECKPOINT_BACKEND"] = "memory"
+# No Tectonic binary is needed to run the suite. The startup check itself is tested directly.
+os.environ["TECTONIC_REQUIRED"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ["LINKEDIN_CLIENT_ID"] = "test-linkedin-client"
 os.environ["LINKEDIN_CLIENT_SECRET"] = "test-fake-linkedin-client-secret"
@@ -96,35 +100,83 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 def migrated_database() -> None:
     """Bring the test database to the latest Alembic revision, once per test session.
 
-    Tests therefore exercise the same migrations that production runs.
+    Tests therefore exercise the same migrations that production runs. Commits do not wait for the disk: the test
+    database is disposable, and every test commits several times (fsync per commit made the suite slow).
     """
     from alembic import command
     from alembic.config import Config
+    from sqlalchemy import event
+
+    from linkedin_agent.database import engine
+
+    @event.listens_for(engine, "connect")
+    def _no_fsync_wait(dbapi_connection: object, _: object) -> None:
+        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        cursor.execute("SET synchronous_commit = off")
+        cursor.close()
 
     command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
+    engine.dispose()  # connections opened before the listener was attached must not be reused
+
+
+def _clean_order() -> tuple[list[str], list[str]]:
+    """Tables to empty, children first, and the ORM tables that have an integer id (their sequences restart).
+
+    DELETE is used instead of TRUNCATE: on this Postgres a TRUNCATE of 12 tables costs about 0.15 s per test, a
+    DELETE per table about 0.02 s. The order comes from the ORM metadata, so a new foreign key cannot break it.
+    The checkpoint tables have no foreign keys and are emptied first.
+    """
+    from linkedin_agent.models import Base
+
+    orm_children_first = [table for table in reversed(Base.metadata.sorted_tables)]
+    orm_names = [table.name for table in orm_children_first]
+    checkpoint_names = [name for name in TABLES if name not in orm_names]
+    with_id = [table.name for table in orm_children_first if "id" in table.c]
+    return checkpoint_names + orm_names, with_id
 
 
 @pytest.fixture
 def clean_database(migrated_database: None) -> Iterator[None]:
-    """Empty every table before the test. Only requested by database-backed tests."""
+    """Empty every table before the test, and restart the id sequences as TRUNCATE ... RESTART IDENTITY would.
+
+    Only requested by database-backed tests.
+    """
     from sqlalchemy import text
 
     from linkedin_agent.database import engine
+    from linkedin_agent.infra.checkpoint import clear_memory_checkpoints
 
+    delete_order, with_id = _clean_order()
+    # One round trip for the whole reset: psycopg runs several statements sent together, in order.
+    script = "".join(f"DELETE FROM {table}; " for table in delete_order)
+    script += "SELECT " + ", ".join(f"setval(pg_get_serial_sequence('{table}', 'id'), 1, false)" for table in with_id)
     with engine.begin() as conn:
-        conn.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
+        conn.execute(text(script))
+    # The ids restart, so a checkpoint kept from an earlier test would belong to a new run with the same thread id.
+    clear_memory_checkpoints()
     yield
 
 
-@pytest.fixture
-def client(clean_database: None, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
-    """FastAPI test client on a clean test database, with embeddings replaced by a constant vector."""
+@pytest.fixture(scope="session")
+def live_client(migrated_database: None) -> Iterator[object]:
+    """One test client for the whole session, with the application lifespan started once.
+
+    Opening a client costs about 0.12 s (an event loop per client), and each request on a fresh client costs about
+    0.2 s on Windows. State lives in the database, which every test empties first, so one client is enough.
+    """
     from fastapi.testclient import TestClient
 
     from linkedin_agent.main import app
 
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def client(clean_database: None, live_client: object, monkeypatch: pytest.MonkeyPatch) -> object:
+    """The session client on a clean test database, with embeddings replaced by a constant vector."""
     monkeypatch.setattr("linkedin_agent.services.rag_service.embed", lambda text: [0.1] * 384)
-    return TestClient(app)
+    return live_client
 
 
 import httpx  # noqa: E402

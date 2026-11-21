@@ -15,8 +15,11 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from . import heartbeat
+
 WINDOW_SECONDS = 60.0
 CHARS_PER_TOKEN_ESTIMATE = 3  # conservative: French and code tokenise into more tokens than English prose
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 10.0  # a waiting call beats at least this often (settings override it)
 
 
 def estimate_prompt_tokens(prompt: str) -> int:
@@ -37,12 +40,16 @@ class TokenBudget:
         *,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
+        heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     ) -> None:
         if tokens_per_minute <= 0:
             raise ValueError("tokens_per_minute must be positive")
+        if heartbeat_interval <= 0:
+            raise ValueError("heartbeat_interval must be positive")
         self._capacity = tokens_per_minute
         self._clock = clock
         self._sleep = sleep
+        self._heartbeat_interval = heartbeat_interval
         self._entries: deque[Reservation] = deque()
 
     @property
@@ -72,7 +79,8 @@ class TokenBudget:
                 self._entries.append(reservation)
                 return reservation
             oldest = self._entries[0].started_at
-            await self._sleep(max(oldest + WINDOW_SECONDS - now, 0.05))
+            # A budget wait is a long silence: it beats while it waits, so the run is not reported as stalled.
+            await heartbeat.wait(max(oldest + WINDOW_SECONDS - now, 0.05), self._heartbeat_interval, sleep=self._sleep)
 
     def correct(self, reservation: Reservation, actual_tokens: int) -> None:
         """Replace the estimate with the tokens the provider reports. Keeps the original time in the window."""

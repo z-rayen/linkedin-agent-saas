@@ -10,6 +10,7 @@ import importlib.util
 from pathlib import Path
 
 import psycopg
+import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.rows import dict_row
 
@@ -46,6 +47,7 @@ def _table_names(conn: psycopg.Connection) -> set[str]:
     return {row["table_name"] for row in rows}
 
 
+@pytest.mark.integration
 def test_the_migrations_create_the_checkpoint_tables(migrated_database: None) -> None:
     with _connect() as conn:
         assert _table_names(conn) >= CHECKPOINT_TABLES
@@ -53,6 +55,7 @@ def test_the_migrations_create_the_checkpoint_tables(migrated_database: None) ->
         assert indexes >= CONCURRENT_INDEXES
 
 
+@pytest.mark.integration
 def test_the_library_setup_does_nothing_after_the_migrations(migrated_database: None) -> None:
     with _connect() as conn:
         versions_before = [

@@ -5,7 +5,6 @@ reserves its estimated tokens in the shared budget (infra/rate_limit.py) and cor
 usage the provider reports. A 429 response is a safety net: its Retry-After header is honoured, capped.
 """
 
-import asyncio
 import logging
 from functools import lru_cache
 from typing import Protocol, TypeVar
@@ -15,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from ..core.exceptions import LLMOutputError, LLMUnavailableError
 from ..core.settings import Settings, get_settings
+from . import heartbeat
 from .rate_limit import Reservation, TokenBudget, estimate_prompt_tokens
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,7 @@ class GroqClient:
         estimate = estimate_prompt_tokens(prompt) + s.llm_max_output_tokens
         for attempt in range(s.groq_max_retries + 1):
             reservation: Reservation = await self._budget.reserve(estimate)
+            await heartbeat.beat()  # the HTTP call below may take up to groq_timeout_seconds with no other sign of life
             async with httpx.AsyncClient(transport=self._transport, trust_env=False) as client:
                 resp = await client.post(
                     s.groq_url,
@@ -87,7 +88,7 @@ class GroqClient:
             if resp.status_code == 429 and attempt < s.groq_max_retries:
                 wait = _retry_after_seconds(resp, fallback=s.groq_retry_wait_seconds)
                 logger.warning("llm rate limited, waiting %.1fs, retry %d/%d", wait, attempt + 1, s.groq_max_retries)
-                await asyncio.sleep(wait)
+                await heartbeat.wait(wait, s.heartbeat_interval_seconds)
                 continue
 
             logger.error("llm request failed status=%s error=%s", resp.status_code, error_code)

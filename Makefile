@@ -4,7 +4,7 @@
 BACKEND := backend
 UV := uv --directory $(BACKEND)
 
-.PHONY: help install db-up db-down migrate run test cov lint format typecheck check docker-up docker-down
+.PHONY: help install db-up db-down migrate run test test-integration cov lint format typecheck check docker-up docker-down
 
 help:
 	@echo "install     install backend dependencies from uv.lock"
@@ -12,7 +12,8 @@ help:
 	@echo "db-down     stop the database containers"
 	@echo "migrate     apply Alembic migrations to the dev database"
 	@echo "run         start the API with reload on http://127.0.0.1:8000"
-	@echo "test        run the test suite (needs the test database, see backend/tests/conftest.py)"
+	@echo "test        run the fast test suite (needs the test database, see backend/tests/conftest.py)"
+	@echo "test-integration run the Postgres integration tests (checkpointer, restart)"
 	@echo "cov         run tests with the coverage gate"
 	@echo "lint        ruff lint and format check"
 	@echo "format      ruff format and autofix"
@@ -38,6 +39,9 @@ run:
 
 test:
 	$(UV) run pytest -q
+
+test-integration:
+	$(UV) run pytest -q -m integration
 
 cov:
 	$(UV) run pytest --cov

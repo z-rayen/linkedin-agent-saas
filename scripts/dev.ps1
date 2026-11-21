@@ -3,7 +3,7 @@
 #   .\scripts\dev.ps1 test
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("install", "db-up", "db-down", "migrate", "run", "test", "cov", "lint", "format", "typecheck", "check", "docker-up", "docker-down")]
+    [ValidateSet("install", "db-up", "db-down", "migrate", "run", "test", "test-integration", "cov", "lint", "format", "typecheck", "check", "docker-up", "docker-down")]
     [string]$Task = "help"
 )
 
@@ -29,6 +29,7 @@ switch ($Task) {
     "migrate"     { Invoke-Uv @("run", "alembic", "upgrade", "head") }
     "run"         { Invoke-Uv @("run", "uvicorn", "linkedin_agent.main:app", "--reload", "--app-dir", "src") }
     "test"        { Invoke-Uv @("run", "pytest", "-q") }
+    "test-integration" { Invoke-Uv @("run", "pytest", "-q", "-m", "integration") }
     "cov"         { Invoke-Uv @("run", "pytest", "--cov") }
     "lint"        { Invoke-Uv @("run", "ruff", "check", "."); Invoke-Uv @("run", "ruff", "format", "--check", ".") }
     "format"      { Invoke-Uv @("run", "ruff", "format", "."); Invoke-Uv @("run", "ruff", "check", "--fix", ".") }
@@ -37,6 +38,6 @@ switch ($Task) {
     "docker-up"   { Invoke-Compose @("up", "-d", "--build") }
     "docker-down" { Invoke-Compose @("down") }
     default {
-        Write-Host "Tasks: install, db-up, db-down, migrate, run, test, cov, lint, format, typecheck, check, docker-up, docker-down"
+        Write-Host "Tasks: install, db-up, db-down, migrate, run, test, test-integration, cov, lint, format, typecheck, check, docker-up, docker-down"
     }
 }

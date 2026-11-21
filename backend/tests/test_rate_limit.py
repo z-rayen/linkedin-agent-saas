@@ -11,9 +11,9 @@ import pytest
 from cryptography.fernet import Fernet
 
 from linkedin_agent.core.settings import Settings
-from linkedin_agent.infra import llm as llm_module
 from linkedin_agent.infra.llm import GroqClient, get_token_budget
 from linkedin_agent.infra.rate_limit import (
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     WINDOW_SECONDS,
     TokenBudget,
     estimate_prompt_tokens,
@@ -56,7 +56,9 @@ def test_a_reservation_over_the_remaining_budget_waits_for_the_window() -> None:
     budget = _budget(1000, time)
     asyncio.run(budget.reserve(800))
     asyncio.run(budget.reserve(500))  # 800 + 500 > 1000: must wait until the first one leaves the window
-    assert time.slept and time.slept[0] == pytest.approx(WINDOW_SECONDS)
+    # The wait is split into heartbeat-sized chunks (see infra/heartbeat.py); the total is still one window.
+    assert sum(time.slept) == pytest.approx(WINDOW_SECONDS)
+    assert max(time.slept) <= DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 
 
 def test_entries_leave_the_window_after_a_minute() -> None:
@@ -149,7 +151,7 @@ def test_a_429_waits_for_the_retry_after_header_then_succeeds(monkeypatch: pytes
     async def record(seconds: float) -> None:
         waits.append(seconds)
 
-    monkeypatch.setattr(llm_module.asyncio, "sleep", record)
+    monkeypatch.setattr(asyncio, "sleep", record)
     responses = iter(
         [
             httpx.Response(429, headers={"retry-after": "12"}, json={"error": {"code": "rate_limit_exceeded"}}),
@@ -160,7 +162,8 @@ def test_a_429_waits_for_the_retry_after_header_then_succeeds(monkeypatch: pytes
         _settings(), transport=httpx.MockTransport(lambda r: next(responses)), budget=_budget(10_000, FakeTime())
     )
     assert asyncio.run(client.complete("p")) == "done"
-    assert waits == [12.0]
+    assert sum(waits) == pytest.approx(12.0)  # chunked for the heartbeat; the total wait is the Retry-After
+    assert max(waits) <= DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 
 
 def test_a_429_without_a_header_uses_the_configured_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,7 +172,7 @@ def test_a_429_without_a_header_uses_the_configured_fallback(monkeypatch: pytest
     async def record(seconds: float) -> None:
         waits.append(seconds)
 
-    monkeypatch.setattr(llm_module.asyncio, "sleep", record)
+    monkeypatch.setattr(asyncio, "sleep", record)
     responses = iter([httpx.Response(429, json={"error": {"code": "rate_limit_exceeded"}}), _ok(5)])
     client = GroqClient(
         _settings(), transport=httpx.MockTransport(lambda r: next(responses)), budget=_budget(10_000, FakeTime())
@@ -184,13 +187,14 @@ def test_an_absurd_retry_after_is_capped(monkeypatch: pytest.MonkeyPatch) -> Non
     async def record(seconds: float) -> None:
         waits.append(seconds)
 
-    monkeypatch.setattr(llm_module.asyncio, "sleep", record)
+    monkeypatch.setattr(asyncio, "sleep", record)
     responses = iter([httpx.Response(429, headers={"retry-after": "86400"}, json={"error": {"code": "x"}}), _ok(5)])
     client = GroqClient(
         _settings(), transport=httpx.MockTransport(lambda r: next(responses)), budget=_budget(10_000, FakeTime())
     )
     asyncio.run(client.complete("p"))
-    assert waits == [60.0]
+    assert sum(waits) == pytest.approx(60.0)  # capped at one minute, chunked for the heartbeat
+    assert max(waits) <= DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 
 
 def test_a_refused_call_keeps_its_estimate_in_the_budget() -> None:

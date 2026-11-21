@@ -9,11 +9,16 @@ Lifecycle of a run:
 The status is always visible, and a run is never left dangling: every path ends in awaiting_review, closed or failed.
 The application is the source of truth. The run and its checkpoint only drive the workflow, so losing them never
 blocks an approval.
+
+Heartbeat: a running job touches its heartbeat at every graph node and during every wait it is in (token budget,
+rate-limit Retry-After). A run is "stalled" when its heartbeat is older than `preparation_stale_seconds`, which must
+be longer than the longest silence a healthy run can have (see `longest_expected_silence_seconds`).
 """
 
 import hashlib
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
@@ -31,8 +36,10 @@ from ..cv.pipeline import tailor_cv
 from ..database import SessionLocal
 from ..domain.outputs import JobAnalysis
 from ..graphs.application_graph import GraphDeps, PreparationError, build_graph
-from ..infra.checkpoint import open_checkpointer
+from ..infra import heartbeat
+from ..infra.checkpoint import active_saver
 from ..infra.llm import complete_structured
+from ..infra.safe_http import OVERALL_DEADLINE_SECONDS
 from ..prompts import render
 from ..services.rag_service import search_knowledge
 from ..services.search_service import search_web
@@ -43,13 +50,53 @@ logger = logging.getLogger(__name__)
 ACTIVE = ("queued", "running")
 RESEARCH_RESULTS = 3
 KNOWLEDGE_TOP_K = 4
+PUBLIC_ID_BYTES = 24  # 192 random bits: a run id cannot be guessed or enumerated
 Mode = Literal["start", "continue", "approved"]
 
 
 def lock_key_for(user_id: int, recipient_email: str, job_title: str) -> str:
-    """The same user, recipient and job title cannot have two active runs."""
-    raw = f"{user_id}|{recipient_email.strip().lower()}|{job_title.strip().lower()}"
+    """The same user, recipient and job title cannot have two active runs.
+
+    The key is built from a JSON array, so a value containing a separator cannot collide with another key. A blank
+    recipient or job title is refused: it would make unrelated applications share one lock.
+    """
+    recipient = " ".join(recipient_email.split()).lower()
+    title = " ".join(job_title.split()).lower()
+    if not recipient:
+        raise ValidationFailedError("recipient_email must not be empty")
+    if not title:
+        raise ValidationFailedError("job_title must not be blank")
+    raw = json.dumps([user_id, recipient, title], separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def longest_expected_silence_seconds(settings: Settings) -> float:
+    """The longest a healthy run can go without a heartbeat.
+
+    Every external call is preceded by a beat, and every wait beats at least every heartbeat interval. So the longest
+    silence is one call that runs to its own timeout, plus one beat interval.
+    """
+    slowest_call = max(settings.groq_timeout_seconds, settings.serper_timeout_seconds, OVERALL_DEADLINE_SECONDS)
+    return slowest_call + settings.heartbeat_interval_seconds
+
+
+def check_stall_threshold(settings: Settings) -> None:
+    """Refuse to start if a healthy run could be reported as stalled. A false alarm would also trigger recovery."""
+    longest = longest_expected_silence_seconds(settings)
+    if settings.preparation_stale_seconds <= longest:
+        raise ValueError(
+            f"PREPARATION_STALE_SECONDS ({settings.preparation_stale_seconds:.0f}) must be longer than the longest "
+            f"expected silence of a run ({longest:.0f}s = slowest external call + HEARTBEAT_INTERVAL_SECONDS)"
+        )
+
+
+def find_run(db: Session, user_id: int, public_id: str) -> models.PreparationRun | None:
+    """The run with this public id, only if it belongs to this user. Anyone else gets None, which is a 404."""
+    return (
+        db.query(models.PreparationRun)
+        .filter(models.PreparationRun.public_id == public_id, models.PreparationRun.user_id == user_id)
+        .first()
+    )
 
 
 def start(db: Session, user_id: int, payload: dict[str, Any]) -> models.PreparationRun:
@@ -61,6 +108,7 @@ def start(db: Session, user_id: int, payload: dict[str, Any]) -> models.Preparat
         raise ValidationFailedError("Upload your master CV first (PUT /applications/master-cv)")
     run = models.PreparationRun(
         user_id=user_id,
+        public_id=secrets.token_urlsafe(PUBLIC_ID_BYTES),
         lock_key=lock_key_for(user_id, str(payload["recipient_email"]), str(payload["job_title"])),
         status="queued",
         payload_json=json.dumps(payload),
@@ -83,17 +131,18 @@ def status_of(run: models.PreparationRun, now: datetime, stale_seconds: float) -
         and (now - run.heartbeat_at) >= timedelta(seconds=stale_seconds)
     )
     return {
-        "run_id": run.id,
+        "run_id": run.public_id,
         "status": run.status,
         "step": run.step,
         "application_id": run.application_id,
         "error": run.error,
         "stalled": stalled,
+        "heartbeat_at": run.heartbeat_at,
     }
 
 
 def _set(run_id: int, **fields: Any) -> None:
-    """Update a run in its own short transaction, and refresh its heartbeat."""
+    """Update a run in its own short transaction, and refresh its heartbeat. No fields: heartbeat only."""
     values: dict[str, Any] = {**fields, "heartbeat_at": utcnow()}
     with SessionLocal() as db:
         db.query(models.PreparationRun).filter(models.PreparationRun.id == run_id).update(
@@ -156,6 +205,10 @@ def _deps(db: Session, run_id: int, user_id: int, profile: dict[str, str], setti
     )
 
 
+async def _beat(run_id: int) -> None:
+    _set(run_id)
+
+
 async def _run(run_id: int, mode: Mode) -> None:
     """Drive the graph for one run. Every outcome writes a final status; nothing is left running silently."""
     settings = get_settings()
@@ -173,7 +226,8 @@ async def _run(run_id: int, mode: Mode) -> None:
         config = {"configurable": {"thread_id": str(run_id)}}
         try:
             deps = _deps(db, run_id, run.user_id, profile, settings)
-            async with open_checkpointer() as saver:
+            saver = active_saver()
+            with heartbeat.heartbeat_bound(lambda: _beat(run_id)):
                 if mode == "approved":
                     # Without a checkpoint there is no pause to resume. Re-running the graph would start it again
                     # from the beginning, so the workflow is closed instead. The approval is already complete.
@@ -235,10 +289,12 @@ async def recover_interrupted(now: datetime | None = None) -> int:
             .all()
         )
         candidates = [run.id for run in stale]
+    if not candidates:
+        return 0
+    saver = active_saver()
     handled = 0
     for run_id in candidates:
-        async with open_checkpointer() as saver:
-            checkpoint = await saver.aget_tuple({"configurable": {"thread_id": str(run_id)}})
+        checkpoint = await saver.aget_tuple({"configurable": {"thread_id": str(run_id)}})
         if checkpoint is None:
             _set(run_id, status="failed", error="interrupted before any checkpoint: submit the request again")
         else:

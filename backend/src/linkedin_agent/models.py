@@ -132,7 +132,9 @@ class PreparationRun(Base):
     """One background run of the application graph. Its status is always visible and never left dangling."""
 
     __tablename__ = "preparation_runs"
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)  # internal: checkpoint thread id, never shown to clients
+    # The only identifier clients see. Random and unguessable, so a sequential id cannot be walked.
+    public_id = Column(String, nullable=False, unique=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     lock_key = Column(String, nullable=False)  # same user, recipient and job title: one active run at a time
     status = Column(

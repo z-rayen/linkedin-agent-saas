@@ -7,7 +7,9 @@ overridden per deployment without touching code.
 """
 
 import os
+from collections.abc import Mapping
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
@@ -53,10 +55,19 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 1024
     # Grounding revisions per preparation: the graph feeds the exact problems back this many times at most.
     graph_max_revisions: int = 2
-    # A preparation whose heartbeat is older than this is considered interrupted (see services/preparations.py).
+    # A running job beats (proof of life) at every graph node, HTTP call and budget wait. A beat is never
+    # older than this many seconds while the job waits, so waits longer than this are chunked.
+    heartbeat_interval_seconds: float = Field(default=10.0, gt=0)
+    # A preparation with no heartbeat for this long is "stalled" (and is recovered at startup). Must be longer than
+    # the longest expected silence; the application refuses to start otherwise (services/preparations.py).
     preparation_stale_seconds: float = 300.0
+    # Where LangGraph keeps the review checkpoints. "postgres" survives restarts (production). "memory" is for tests
+    # and throwaway runs: a restart then leaves active runs without a checkpoint, and they are failed on recovery.
+    checkpoint_backend: Literal["postgres", "memory"] = "postgres"
     # Checkpointer connection (LangGraph Postgres). Empty means: DATABASE_URL with the +psycopg2 driver suffix removed.
     checkpoint_database_url: SecretStr = SecretStr("")
+    # One connection pool per process, opened at startup and closed at shutdown (not one connection per run).
+    checkpoint_pool_max_size: int = 4
     # Local embedding model (384 dimensions, FR/EN). Must match the Vector(384) column.
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
@@ -136,6 +147,9 @@ class Settings(BaseSettings):
     # LaTeX compiler for tailored CVs (Tectonic single binary). Empty means: look on PATH.
     tectonic_path: str = ""
     tectonic_timeout_seconds: float = 180.0
+    # When true, the API refuses to start without a working Tectonic (fail early, not on the first CV).
+    # Tests disable it.
+    tectonic_required: bool = True
     # Personal files (real master CV, generated PDFs). Gitignored: never commit this folder.
     private_data_dir: str = "data/private"
 
@@ -186,3 +200,25 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return the process-wide settings. Cached: environment changes after the first call are ignored."""
     return Settings()
+
+
+# Variables that were removed. Settings ignores unknown variables, so without this check a leftover FRONTEND_URL
+# would be silently ignored and CORS would quietly stop allowing the frontend.
+RETIRED_VARIABLES: dict[str, str] = {
+    "FRONTEND_URL": "FRONTEND_ORIGIN (an origin such as http://localhost:5173, without a path)",
+    "CORS_ORIGINS": "FRONTEND_ORIGIN (one origin: the CORS allowlist is exactly that origin)",
+}
+
+
+def retired_variable_warnings(environ: Mapping[str, str], dotenv: Mapping[str, str | None]) -> list[str]:
+    """One message per retired variable found in the environment or in the .env file, naming its replacement."""
+    messages: list[str] = []
+    for name, replacement in RETIRED_VARIABLES.items():
+        sources = [
+            source
+            for source, values in (("environment", environ), (".env file", dotenv))
+            if values.get(name) is not None
+        ]
+        if sources:
+            messages.append(f"{name} is set ({' and '.join(sources)}) but is no longer read: use {replacement} instead")
+    return messages

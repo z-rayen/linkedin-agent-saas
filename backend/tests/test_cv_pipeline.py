@@ -129,3 +129,33 @@ def test_binary_not_configured_and_not_on_path_is_a_clear_error(monkeypatch: pyt
     monkeypatch.setattr(shutil, "which", lambda name: None)
     with pytest.raises(CVCompilationError, match="TECTONIC_PATH"):
         find_tectonic(_settings())
+
+
+def test_the_api_refuses_to_start_when_tectonic_is_required_and_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from linkedin_agent.cv.compile import ensure_tectonic_at_startup
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    settings = _settings().model_copy(update={"tectonic_required": True})
+    with pytest.raises(RuntimeError, match="API not started.*TECTONIC_PATH.*TECTONIC_REQUIRED=false"):
+        ensure_tectonic_at_startup(settings)
+
+
+def test_the_startup_check_names_a_wrong_windows_path(tmp_path: Path) -> None:
+    from linkedin_agent.cv.compile import ensure_tectonic_at_startup
+
+    settings = _settings(tectonic_path=r"C:\tools\tectonic\tectonic.exe").model_copy(update={"tectonic_required": True})
+    with pytest.raises(RuntimeError, match="missing file"):
+        ensure_tectonic_at_startup(settings)
+
+
+def test_the_startup_check_passes_with_a_binary_and_is_skipped_when_not_required(tmp_path: Path) -> None:
+    from linkedin_agent.cv.compile import ensure_tectonic_at_startup
+
+    binary = tmp_path / "tectonic"
+    binary.write_bytes(b"")
+    ensure_tectonic_at_startup(_settings(tectonic_path=str(binary)).model_copy(update={"tectonic_required": True}))
+    ensure_tectonic_at_startup(
+        _settings(tectonic_path=str(tmp_path / "absent")).model_copy(update={"tectonic_required": False})
+    )

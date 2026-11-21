@@ -96,30 +96,49 @@ def put_master_cv(
     return {"status": "saved", "facts": len(master.facts)}
 
 
-@router.post("", status_code=202)
+@router.post(
+    "",
+    status_code=202,
+    summary="Start preparing an application (asynchronous)",
+    description=(
+        "Accepts the job and returns 202 at once with a `run_id` and `status: queued`. The preparation (job analysis, "
+        "research, CV tailoring, email draft, grounding check) runs in the background and ends at `awaiting_review`, "
+        "with the application stored as `prepared`.\n\n"
+        "Flow: 1) POST here. 2) Poll `GET /applications/preparations/{run_id}` every few seconds until `status` is "
+        "`awaiting_review` (read `application_id`, then `GET /applications/{application_id}`), `closed`, or `failed` "
+        "(read `error`). 3) Review, then approve and send through their own endpoints. Preparing never approves or "
+        "sends. A 409 means a run for the same recipient and job title is already active."
+    ),
+)
 async def create_application(
     payload: ApplicationCreate,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Start a preparation in the background. Poll GET /applications/preparations/{run_id} for progress."""
     run = preparations.start(db, current_user.id, payload.model_dump())
     background.add_task(preparations.execute, run.id)
     return preparations.status_of(run, utcnow(), get_settings().preparation_stale_seconds)
 
 
-@router.get("/preparations/{run_id}")
+@router.get(
+    "/preparations/{run_id}",
+    summary="Status of a background preparation",
+    description=(
+        "`run_id` is the random token returned by `POST /applications`, not a sequential number. Only the user who "
+        "started the run can read it: for anyone else the answer is 404, the same as for a run that does not exist.\n\n"
+        "`status`: `queued`, `running`, `awaiting_review` (the application is ready to review), `closed` (the workflow "
+        "record is finished), or `failed` (see `error`). `step` names the graph node in progress. `stalled` is true "
+        "when the run has sent no heartbeat for `PREPARATION_STALE_SECONDS`. Stalled runs are recovered at startup.\n\n"
+        "Poll every few seconds. Stop when the status is `awaiting_review`, `closed` or `failed`."
+    ),
+)
 def get_preparation(
-    run_id: int,
+    run_id: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    run = (
-        db.query(models.PreparationRun)
-        .filter(models.PreparationRun.id == run_id, models.PreparationRun.user_id == current_user.id)
-        .first()
-    )
+    run = preparations.find_run(db, current_user.id, run_id)
     if run is None:
         raise http_error(NotFoundError("Preparation not found"))
     return preparations.status_of(run, utcnow(), get_settings().preparation_stale_seconds)

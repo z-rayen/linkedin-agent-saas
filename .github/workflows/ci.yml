@@ -61,6 +61,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - run: uv run pytest --cov --cov-report=xml
+      - run: uv run pytest -m integration -q
       - uses: actions/upload-artifact@v4
         if: always()
         with:

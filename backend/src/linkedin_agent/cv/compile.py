@@ -33,6 +33,24 @@ def find_tectonic(settings: Settings) -> Path:
     return Path(found)
 
 
+def ensure_tectonic_at_startup(settings: Settings) -> None:
+    """Fail the API at startup, with a clear message, when CV compilation cannot work.
+
+    Without this check the first CV request would be the one to discover a wrong TECTONIC_PATH. A Windows path
+    inside the Linux container is the typical cause; the message names the variable to fix.
+    """
+    if not settings.tectonic_required:
+        return
+    try:
+        binary = find_tectonic(settings)
+    except CVCompilationError as exc:
+        raise RuntimeError(
+            f"API not started: {exc.message}. Tailored CVs cannot be compiled without Tectonic. "
+            "Fix TECTONIC_PATH, or set TECTONIC_REQUIRED=false if you do not need CV PDFs."
+        ) from None
+    logger.info("tectonic available for CV compilation: %s", binary.name)
+
+
 def compile_latex(source: str, out_dir: Path, tectonic: Path, timeout_seconds: float) -> Path:
     """Write `source` into `out_dir`, compile it, and return the PDF path. The log is kept on failure."""
     out_dir.mkdir(parents=True, exist_ok=True)
