@@ -192,6 +192,37 @@ are read.
 | `RESEARCH_PAGE_MAX_CHARS` | 1500 | characters kept per fetched page |
 | `RESEARCH_CONTEXT_MAX_CHARS` | 9000 | characters of sources in one prompt (about 3000 estimated tokens) |
 | `RESEARCH_STRUCTURED_RETRIES` | 1 | retries of the plan and reflection steps when their JSON does not validate |
+| `RESEARCH_MIN_RELEVANCE` | 0.3 | share of the query's topic words a result must match (title, summary, domain) to be read and shown |
+| `RESEARCH_REQUIRE_CITATIONS` | true | a sentence without a citation is dropped (table rows and headings are kept) |
+| `RESEARCH_SNIPPET_LABEL` | "(according to the search result snippet)" | appended to a statement that rests only on snippets |
+| `RESEARCH_RETRIEVAL_LINE` | "Sources retrieved on {date}." | ends every answer that has sources; `{date}` is the retrieval date (UTC) |
+| `RESEARCH_NOT_SPECIFIED` | "not specified in the sources" | written in an empty table cell, instead of a guess |
+
+The three wording settings are fixed text added by the checks: set them in the language of your deployment.
+
+**Answer checks.** The model writes the answer; code then checks it (`graphs/research_checks.py`, no model involved):
+
+- **Traceability.** Every statement must cite a source. A statement that rests only on search snippets is labelled
+  with `RESEARCH_SNIPPET_LABEL`, so it is never presented as verified. A statement with at least one full page is not
+  labelled.
+- **Numbers and dates, by value.** A number in a statement must appear, by value, in the text of a source it cites:
+  `2,000` and `2000` are the same, `7,497` and `7479` are not. An ISO date is one unit (`2026-11-11` is not checked
+  part by part). A statement with an unsupported number is dropped.
+- **Relative time.** "last two weeks", "recently", "current", "latest", "il y a", "derniers jours" and similar are
+  dropped: their date cannot be checked against the sources. Answers say when their sources were retrieved instead.
+- **Empty cells.** An empty table cell is written as `RESEARCH_NOT_SPECIFIED`. The prompt asks the model for the same
+  wording instead of a guess, and a test runs a model that leaves a field out.
+- **Relevance.** A search result whose title, summary and domain share too few topic words with the query is not read
+  and not shown. The filter keeps everything when the query has no topic word.
+
+Each run returns the answer and its traceability, in the result:
+
+- `answer`, `retrieved_at` (the date the sources were retrieved), `claims` (each statement, with `sources` and `basis`
+  `fetched` or `snippet`);
+- `sources`: only the sources the answer cites, with their `fetched` flag, so a UI can show which statements rest on a
+  full page;
+- `also_found`: the other retrieved sources, which no statement rests on;
+- `unsupported`: counts of the statements dropped, by reason (`uncited`, `relative_time`, `numbers`), and `off_topic`.
 
 Per step, `LLM_STEP_OVERRIDES` can set a model and a reasoning effort for `research_plan`, `research_reflect`,
 `research_answer` and `research_post`, as for the other steps.

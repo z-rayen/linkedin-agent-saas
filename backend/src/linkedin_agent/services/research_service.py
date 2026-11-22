@@ -21,6 +21,7 @@ from ..graphs.research_graph import (
     Reflection,
     ResearchDeps,
     ResearchLimits,
+    ResearchWording,
     Source,
     build_graph,
     fit_sources,
@@ -49,6 +50,16 @@ def limits_from(settings: Settings) -> ResearchLimits:
         max_pages=settings.research_max_pages,
         page_max_chars=settings.research_page_max_chars,
         context_max_chars=settings.research_context_max_chars,
+        min_relevance=settings.research_min_relevance,
+        require_citations=settings.research_require_citations,
+    )
+
+
+def wording_from(settings: Settings) -> ResearchWording:
+    return ResearchWording(
+        snippet_label=settings.research_snippet_label,
+        not_specified=settings.research_not_specified,
+        retrieval_line=settings.research_retrieval_line,
     )
 
 
@@ -133,7 +144,7 @@ def build_deps(
 
     async def synthesize(request: str, user_profile: dict[str, str], history: str, shown: list[Source]) -> str:
         prompt = render(
-            "research_answer.v2",
+            "research_answer.v3",
             field=user_profile["field"],
             skills=user_profile["skills"],
             level=user_profile["level"],
@@ -166,6 +177,7 @@ def build_deps(
         save_draft=save_draft,
         on_step=on_step or no_op,
         limits=limits,
+        wording=wording_from(settings),
     )
 
 
@@ -194,13 +206,32 @@ async def run_research(
         }
     )
     shown: list[Source] = state.get("shown", [])
+    claims: list[dict[str, Any]] = state.get("claims", [])
+    cited_numbers = sorted({number for claim in claims for number in claim["sources"]})
+    cited_links = {shown[number - 1]["link"] for number in cited_numbers}
+    # "sources" are the ones the answer cites, numbered as in the answer. The other retrieved links are "also_found":
+    # they were searched and read or kept as snippets, but no statement of the answer rests on them.
     return {
         "answer": state.get("answer", ""),
-        "queries": state.get("queries_run", []),
+        "retrieved_at": state.get("retrieved_at", ""),
+        "claims": claims,
         "sources": [
-            {"number": number, "title": s["title"], "link": s["link"], "fetched": s["read"]}
-            for number, s in enumerate(shown, start=1)
+            {
+                "number": number,
+                "title": shown[number - 1]["title"],
+                "link": shown[number - 1]["link"],
+                "fetched": shown[number - 1]["fetched"],
+            }
+            for number in cited_numbers
         ],
+        "also_found": [
+            {"title": s["title"], "link": s["link"], "fetched": s["fetched"]}
+            for s in state.get("sources", [])
+            if s["link"] not in cited_links
+        ],
+        "unsupported": state.get("unsupported", {}),
+        "off_topic": state.get("off_topic", 0),
+        "queries": state.get("queries_run", []),
         "citations": state.get("citations", []),
         "removed_citations": state.get("removed_citations", 0),
         "post_id": state.get("post_id"),

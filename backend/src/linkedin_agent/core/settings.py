@@ -107,6 +107,15 @@ class Settings(BaseSettings):
     research_context_max_chars: int = Field(default=9000, ge=1000)
     # Retries of each structured step (plan, reflection) when its answer does not validate.
     research_structured_retries: int = Field(default=1, ge=0)
+    # A search result whose title, summary and domain share less than this fraction of the query's terms is off-topic:
+    # it is not read, not shown and not cited. 0 keeps everything.
+    research_min_relevance: float = Field(default=0.3, ge=0, le=1)
+    # A sentence of the answer must cite a source. Uncited sentences are dropped (table rows and headings are kept).
+    research_require_citations: bool = True
+    # Fixed wording the answer checks add. Set in the language of the deployment; the defaults are English.
+    research_snippet_label: str = "(according to the search result snippet)"
+    research_retrieval_line: str = "Sources retrieved on {date}."
+    research_not_specified: str = "not specified in the sources"
 
     # Default profile, used until the user saves their own.
     default_field: str = "Machine Learning, Data Science"

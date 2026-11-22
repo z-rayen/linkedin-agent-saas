@@ -11,12 +11,12 @@ Search results and page text are untrusted data. They reach a model only through
 UNTRUSTED markers, and the graph never turns them into a query, a link to follow or an instruction: the only links
 that are read are the ones the search returned, and every fetch goes through safe_http in the service layer.
 
-Citations are checked here, deterministically: each [n] in the answer must name a source the model was shown. Any
-other number is removed from the text and counted. A number is never kept, and never invented.
+The answer is checked by code (graphs/research_checks.py): citations name shown sources, a statement rests on a full
+page or is labelled as a snippet, numbers match their sources by value, relative times are removed, and every answer
+states the date its sources were retrieved.
 """
 
 import logging
-import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -25,7 +25,9 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from ..clock import utcnow
 from ..core.exceptions import ExternalServiceError
+from .research_checks import Evidence, check_answer, check_citations, relevance
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +39,6 @@ ANSWER_UNAVAILABLE_MESSAGE = "The answer could not be produced right now. Retry 
 TITLE_MAX_CHARS = 200
 LINK_MAX_CHARS = 2048
 FALLBACK_QUERY_MAX_CHARS = 200
-CITATION_PATTERN = re.compile(r"\[(\d{1,3})\]")
-SPACE_BEFORE_PUNCTUATION = re.compile(r"[ \t]+([.,;:!?])")
-REPEATED_SPACES = re.compile(r"[ \t]{2,}")
 
 
 class Hit(TypedDict):
@@ -55,6 +54,7 @@ class Source(TypedDict):
     link: str
     snippet: str  # the search result's summary
     text: str  # the page text when the page was read, otherwise the snippet
+    fetched: bool  # the full page was read: its text is the page, not a snippet
     read: bool  # a fetch was attempted for this source (once, whatever the outcome)
 
 
@@ -64,17 +64,21 @@ class ResearchState(TypedDict, total=False):
     profile: dict[str, str]
     history: str
     draft_post: bool
+    retrieved_at: str  # the date the sources were retrieved (ISO, UTC)
     pending_queries: list[str]
     queries_run: list[str]
     sources: list[Source]
     seen_links: list[str]
     loop: int  # search rounds run so far; round 1 is the first search, not a refinement
     new_sources: int  # new links found by the last search round
+    off_topic: int  # search results dropped by the relevance filter
     pages_read: int
     sufficient: bool
     shown: list[Source]  # the sources the synthesis was shown; their numbers are the ones it may cite
     answer: str
     answer_ok: bool
+    claims: list[dict[str, Any]]  # each statement of the answer, with its sources and their basis
+    unsupported: dict[str, int]  # statements dropped by the checks, by reason (counts only)
     citations: list[int]
     removed_citations: int
     post_id: int | None
@@ -89,19 +93,21 @@ class ResearchLimits:
     max_pages: int
     page_max_chars: int
     context_max_chars: int
+    min_relevance: float  # search results below this share of matching query terms are off-topic
+    require_citations: bool  # an uncited sentence is dropped
+
+
+@dataclass(frozen=True)
+class ResearchWording:
+    snippet_label: str  # appended to a statement that rests only on search snippets
+    not_specified: str  # written in an empty table cell, or as an answer to a missing fact
+    retrieval_line: str  # "{date}" is the retrieval date; it ends every answer that has sources
 
 
 @dataclass(frozen=True)
 class Reflection:
     sufficient: bool
     queries: list[str]
-
-
-@dataclass(frozen=True)
-class CitationCheck:
-    text: str
-    cited: list[int]  # valid numbers, in order of first use
-    removed: int  # markers removed because they named no source that was shown
 
 
 @dataclass(frozen=True)
@@ -117,10 +123,12 @@ class ResearchDeps:
     save_draft: Callable[[int, str, str], Awaitable[int]]  # (user_id, title, text) -> content queue id
     on_step: Callable[[str], Awaitable[None]]
     limits: ResearchLimits
+    wording: ResearchWording
 
 
 def numbered_block(number: int, source: Source) -> str:
-    return f"[{number}] {source['title']}\nURL: {source['link']}\n{source['text']}"
+    basis = "full page" if source["fetched"] else "search snippet only"
+    return f"[{number}] {source['title']} ({basis})\nURL: {source['link']}\n{source['text']}"
 
 
 def fit_sources(sources: list[Source], max_chars: int) -> list[Source]:
@@ -137,28 +145,6 @@ def fit_sources(sources: list[Source], max_chars: int) -> list[Source]:
         kept.append(source)
         used += size
     return kept
-
-
-def check_citations(answer: str, source_count: int) -> CitationCheck:
-    """Keep the [n] markers that name a shown source, remove the others. Deterministic, no model involved."""
-    cited: list[int] = []
-    removed = 0
-
-    def replace(match: re.Match[str]) -> str:
-        nonlocal removed
-        number = int(match.group(1))
-        if 1 <= number <= source_count:
-            if number not in cited:
-                cited.append(number)
-            return match.group(0)
-        removed += 1
-        return ""
-
-    text = CITATION_PATTERN.sub(replace, answer)
-    if removed:
-        text = SPACE_BEFORE_PUNCTUATION.sub(r"\1", text)
-        text = REPEATED_SPACES.sub(" ", text)
-    return CitationCheck(text=text.strip(), cited=cited, removed=removed)
 
 
 def _instrumented(name: str, deps: ResearchDeps, node: Callable[[ResearchState], Awaitable[dict[str, Any]]]):  # type: ignore[no-untyped-def]
@@ -216,12 +202,14 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         if not cleaned:
             cleaned = [state["request"][:FALLBACK_QUERY_MAX_CHARS]]
         return {
+            "retrieved_at": utcnow().date().isoformat(),
             "pending_queries": cleaned,
             "queries_run": [],
             "sources": [],
             "seen_links": [],
             "loop": 0,
             "new_sources": 0,
+            "off_topic": 0,
             "pages_read": 0,
             "sufficient": False,
         }
@@ -230,6 +218,7 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         sources: list[Source] = [Source(**source) for source in state.get("sources", [])]
         seen = set(state.get("seen_links", []))
         queries_run = list(state.get("queries_run", []))
+        off_topic = state.get("off_topic", 0)
         new = 0
         for query in state.get("pending_queries", []):
             queries_run.append(query)
@@ -244,6 +233,9 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                 link = str(hit["link"])[:LINK_MAX_CHARS]
                 if not link or link in seen or len(sources) >= limits.max_sources:
                     continue
+                if relevance(query, str(hit["title"]), str(hit["summary"]), link) < limits.min_relevance:
+                    off_topic += 1  # not read, not shown, not cited
+                    continue
                 seen.add(link)
                 snippet = str(hit["summary"])[: limits.page_max_chars]
                 sources.append(
@@ -252,6 +244,7 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                         link=link,
                         snippet=snippet,
                         text=snippet,
+                        fetched=False,
                         read=False,
                     )
                 )
@@ -263,6 +256,7 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
             "pending_queries": [],
             "loop": state.get("loop", 0) + 1,
             "new_sources": new,
+            "off_topic": off_topic,
         }
 
     async def read(state: ResearchState) -> dict[str, Any]:
@@ -281,6 +275,7 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                 text = ""
             if text:
                 source["text"] = text[: limits.page_max_chars]
+                source["fetched"] = True
         return {"sources": sources, "pages_read": pages}
 
     async def reflect(state: ResearchState) -> dict[str, Any]:
@@ -299,6 +294,8 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                 "shown": [],
                 "answer": NO_SOURCES_MESSAGE,
                 "answer_ok": False,
+                "claims": [],
+                "unsupported": {},
                 "citations": [],
                 "removed_citations": 0,
             }
@@ -309,18 +306,48 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                 "shown": shown,
                 "answer": ANSWER_UNAVAILABLE_MESSAGE,
                 "answer_ok": False,
+                "claims": [],
+                "unsupported": {},
                 "citations": [],
                 "removed_citations": 0,
             }
-        checked = check_citations(raw, len(shown))
-        if checked.removed:
-            logger.warning("research citations removed count=%d", checked.removed)
+        cited = check_citations(raw, len(shown))
+        if cited.removed:
+            logger.warning("research citations removed count=%d", cited.removed)
+        checked = check_answer(
+            cited.text,
+            [Evidence(text=source["text"], fetched=source["fetched"]) for source in shown],
+            snippet_label=deps.wording.snippet_label,
+            not_specified=deps.wording.not_specified,
+            require_citations=limits.require_citations,
+        )
+        unsupported = {
+            "uncited": checked.dropped_uncited,
+            "relative_time": checked.dropped_relative_time,
+            "numbers": checked.dropped_numbers,
+        }
+        logger.info(
+            "research checks statements=%d dropped=%d labelled=%d cells_filled=%d",
+            len(checked.claims),
+            sum(unsupported.values()),
+            checked.labelled,
+            checked.cells_filled,
+        )
+        answer_ok = bool(checked.text)
+        text = checked.text
+        if answer_ok:
+            # Every answer that rests on sources says when they were retrieved: "current" means nothing without it.
+            text = f"{text}\n\n{deps.wording.retrieval_line.format(date=state['retrieved_at'])}"
         return {
             "shown": shown,
-            "answer": checked.text,
-            "answer_ok": bool(checked.text),
-            "citations": checked.cited,
-            "removed_citations": checked.removed,
+            "answer": text,
+            "answer_ok": answer_ok,
+            "claims": [
+                {"text": claim.text, "sources": list(claim.sources), "basis": claim.basis} for claim in checked.claims
+            ],
+            "unsupported": unsupported,
+            "citations": cited.cited,
+            "removed_citations": cited.removed,
         }
 
     async def draft_post(state: ResearchState) -> dict[str, Any]:

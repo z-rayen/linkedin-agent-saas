@@ -26,7 +26,7 @@ UNTRUSTED_FIELDS: dict[str, frozenset[str]] = {
     "score_item.v1": frozenset({"title", "summary"}),
     "cover_letter.v1": frozenset({"title", "summary"}),
     "research_answer.v1": frozenset({"sources"}),
-    "research_answer.v2": frozenset({"sources"}),
+    "research_answer.v3": frozenset({"sources"}),
     "research_reflect.v1": frozenset({"evidence"}),
     "engage_comment.v1": frozenset({"post_title", "post_summary"}),
     "linkedin_post.v1": frozenset({"findings"}),
