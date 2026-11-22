@@ -300,7 +300,9 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         return {"sufficient": reflection.sufficient, "pending_queries": queries}
 
     async def synthesize(state: ResearchState) -> dict[str, Any]:
-        shown = fit_sources(state.get("sources", []), limits.context_max_chars)
+        # Full pages first: a page the model can cite for a precise fact is never left out behind a snippet.
+        ordered = sorted(state.get("sources", []), key=lambda source: not source["fetched"])
+        shown = fit_sources(ordered, limits.context_max_chars)
         if not shown:
             return {
                 "shown": [],
@@ -335,14 +337,17 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         language = deps.languages.get(state.get("language", ""), deps.languages[deps.default_language])
         checked = check_answer(
             cited.text,
-            [Evidence(text=source["text"], fetched=source["fetched"]) for source in shown],
+            # The title is part of the source: a figure in a title ("Plus de 1 250 offres") is a figure of the source.
+            [Evidence(text=f"{source['title']} {source['text']}", fetched=source["fetched"]) for source in shown],
             language=language,
             require_citations=limits.require_citations,
+            known_labels=tuple(pack.snippet_label for pack in deps.languages.values()),
         )
         unsupported = {
             "uncited": checked.dropped_uncited,
             "relative_time": checked.dropped_relative_time,
-            "numbers": checked.dropped_numbers,
+            "numbers_not_found": checked.dropped_numbers_not_found,
+            "numbers_snippet_only": checked.dropped_numbers_snippet_only,
         }
         logger.info(
             "research checks statements=%d dropped=%d labelled=%d cells_filled=%d",

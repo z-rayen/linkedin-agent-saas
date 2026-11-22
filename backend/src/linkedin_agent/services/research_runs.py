@@ -10,6 +10,8 @@ same, and so is the discipline (see services/preparations.py):
 A research run never reads, resumes or reports an application run, and the reverse holds too (kind is checked).
 """
 
+import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -130,6 +132,14 @@ async def _beat(run_id: int) -> None:
     _set(run_id)
 
 
+async def _pulse(run_id: int, interval: float) -> None:
+    """A heartbeat every `interval` seconds for as long as the graph runs. A long model call or a slow page fetch is
+    silent otherwise, and a silent run looks stalled."""
+    while True:
+        await asyncio.sleep(interval)
+        _set(run_id)
+
+
 async def _save_draft(user_id: int, title: str, text: str) -> int:
     """A post goes into the content queue as a draft. Nothing here publishes it."""
     with SessionLocal() as db:
@@ -181,6 +191,7 @@ async def _run_graph(run_id: int, *, resume: bool) -> None:
             "draft_post": payload["draft_post"],
         }
     )
+    pulse = asyncio.create_task(_pulse(run_id, settings.heartbeat_interval_seconds))
     try:
         with heartbeat.heartbeat_bound(lambda: _beat(run_id)):
             state = await graph.ainvoke(initial, config)
@@ -191,6 +202,10 @@ async def _run_graph(run_id: int, *, resume: bool) -> None:
         logger.error("research run=%d failed error_type=%s", run_id, type(exc).__name__)
         message = exc.message if isinstance(exc, AppError) else f"research failed ({type(exc).__name__})"
         _set(run_id, status="failed", error=message)
+    finally:
+        pulse.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pulse
 
 
 async def execute(run_id: int) -> None:

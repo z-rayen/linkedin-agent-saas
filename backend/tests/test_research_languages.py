@@ -121,7 +121,7 @@ def test_a_figure_is_checked_with_the_convention_of_the_answer_language(
     model["answer"] = statement
     result = _run(request_text)
     assert (statement in result["answer"]) is kept
-    assert result["unsupported"]["numbers"] == (0 if kept else 1)
+    assert sum(result["unsupported"][k] for k in ("numbers_not_found", "numbers_snippet_only")) == (0 if kept else 1)
 
 
 # --- relative times: counted, and said so --------------------------------------------------------------

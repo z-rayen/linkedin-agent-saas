@@ -13,11 +13,15 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .core.exceptions import AppError
 from .core.logging import RequestIdMiddleware, setup_logging
+from .core.responses import UTF8JSONResponse
 from .core.settings import Settings, get_settings, retired_variable_warnings
 from .cv.compile import ensure_tectonic_at_startup
 from .infra.checkpoint import checkpointer_lifespan
@@ -71,6 +75,7 @@ warn_about_retired_variables()
 app = FastAPI(
     title="LinkedIn Agent SaaS",
     lifespan=lifespan,
+    default_response_class=UTF8JSONResponse,
     description=(
         "Applications are prepared asynchronously: `POST /applications` returns 202 with a `run_id`, and "
         "`GET /applications/preparations/{run_id}` reports progress until the application is `awaiting_review`. "
@@ -82,7 +87,18 @@ app = FastAPI(
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """Map domain errors to HTTP responses. Keeps the `detail` field the frontend already reads."""
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "code": exc.code})
+    return UTF8JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "code": exc.code})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Errors raised as HTTPException (http_error in core/exceptions.py) keep FastAPI's `detail` and get UTF-8 too."""
+    return UTF8JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return UTF8JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 app.add_middleware(RequestIdMiddleware)

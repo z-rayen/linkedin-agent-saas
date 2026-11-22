@@ -223,6 +223,12 @@ convention will not match, and that is deliberate.
   dropped: their date cannot be checked against the sources. The answer says how many were removed, and that this does
   not mean nothing was found. If every statement is removed, the answer says that no statement could be checked, and
   that this does not mean nothing was found either. The counts are in `unsupported.relative_time`.
+- **Labels and tables.** The snippet label is added by code only, from the basis: a label the model writes is removed
+  first, so a full-page statement never carries one. In a table, the label and the citations stay inside the cells: a
+  citation written after the last column moves into the last cell, a short row is padded, and every row keeps the
+  table's width.
+- **Full pages first.** Full pages are shown to the model before snippets, so a page that states a precise figure or a
+  job title is used rather than ignored.
 - **Empty cells.** An empty table cell is written as the language's "not specified" wording. The prompt asks the model
   for the same wording instead of a guess, and a test runs a model that leaves a field out.
 - **Relevance.** A search result is read and shown only when it matches at least `RESEARCH_MIN_RELEVANCE` of the
@@ -239,7 +245,9 @@ Each run returns the answer and its traceability, in the result:
 - `sources`: only the sources the answer cites, with their `fetched` flag, so a UI can show which statements rest on a
   full page;
 - `also_found`: the other retrieved sources, which no statement rests on. It is kept visible on purpose;
-- `unsupported`: counts of the statements dropped, by reason (`uncited`, `relative_time`, `numbers`), and `off_topic`
+- `unsupported`: counts of the statements dropped, by reason: `uncited`, `relative_time`, `numbers_not_found` (a cited
+  full page lacks the figure) and `numbers_snippet_only` (the cited sources are snippets, and the figure is not in
+  them), plus `off_topic` (search results dropped by the relevance filter)
   (search results dropped by the relevance filter).
 
 Per step, `LLM_STEP_OVERRIDES` can set a model and a reasoning effort for `research_plan`, `research_reflect`,
@@ -261,7 +269,9 @@ on your own data.
 
 - `POST /agent/research` with `{"request": "...", "draft_post": false}` returns `202` with a `run_id` and
   `status: "queued"`. A run takes minutes: poll `GET /agent/research/{run_id}` until `status` is `done` (read `result`)
-  or `failed` (read `error`). `stalled: true` means the heartbeat stopped; the run is resumed or failed at restart.
+  or `failed` (read `error`). A heartbeat is sent every `HEARTBEAT_INTERVAL_SECONDS` for as long as the run is working,
+  including during a long model call; `stalled: true` means the heartbeat stopped, and the run is resumed or failed at
+  restart. Responses are UTF-8 JSON (`application/json; charset=utf-8`), accents included.
 - The run id is random (192 bits). Only the user who started the run can read it; anyone else, and an unknown id, get
   the same `404`. A second run of the same request (case and spacing aside) while the first is active returns `409`.
 - `draft_post: true` saves a LinkedIn post as a **draft** in the content queue. Nothing is published by the run.

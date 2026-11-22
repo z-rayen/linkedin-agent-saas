@@ -97,7 +97,7 @@ def test_a_number_the_cited_source_does_not_contain_is_dropped() -> None:
 def test_a_number_with_no_citation_is_never_kept() -> None:
     checked = _check("Acme has 2,000 offers.", FULL_EN)
     assert checked.text == ""
-    assert checked.dropped_numbers == 1
+    assert checked.dropped_uncited == 1  # a sentence whose only number has no citation is an uncited statement
 
 
 def test_a_date_is_checked_as_a_whole_against_the_source() -> None:
@@ -228,7 +228,8 @@ def test_a_table_with_a_missing_company_gets_the_not_specified_cell() -> None:
 
 def test_a_snippet_only_table_row_gets_the_snippet_label() -> None:
     checked = _check("| Acme | 7,479 offers [1] |", SNIPPET_EN)
-    assert checked.text.endswith(EN.snippet_label)
+    # The label sits inside the last cell: the row keeps its two cells.
+    assert checked.text == f"| Acme | 7,479 offers [1] {EN.snippet_label} |"
 
 
 # --- language detection ----------------------------------------------------------------------------

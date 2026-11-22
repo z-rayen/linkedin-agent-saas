@@ -112,7 +112,12 @@ def test_the_answer_keeps_only_what_the_sources_support(world: FakeModel) -> Non
     assert "Other claim" not in answer  # its only citation named no shown source
     assert "| Company | Role | Date |" in answer  # the table structure is kept
     assert "| not specified in the sources | ML intern | 2026-11-10 [1] |" in answer  # the omitted field
-    assert result["unsupported"] == {"uncited": 1, "relative_time": 1, "numbers": 1}
+    assert result["unsupported"] == {
+        "uncited": 1,
+        "relative_time": 1,
+        "numbers_not_found": 1,
+        "numbers_snippet_only": 0,
+    }
     assert result["removed_citations"] == 1
 
 

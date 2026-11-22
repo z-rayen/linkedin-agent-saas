@@ -91,6 +91,10 @@ class AnswerCheck:
     cells_filled: int
     labels_removed: int  # snippet labels written by the model and removed by the check
 
+    @property
+    def dropped_numbers(self) -> int:
+        return self.dropped_numbers_not_found + self.dropped_numbers_snippet_only
+
 
 FETCHED = "fetched"
 SNIPPET = "snippet"
@@ -272,8 +276,8 @@ def check_answer(
         if label_pattern is not None:
             line, removed_here = label_pattern.subn("", line)
             labels_removed += removed_here
-            if removed_here:
-                line = re.sub(r"[ \t]{2,}", " ", line).rstrip()
+            if removed_here:  # the punctuation that followed the label closes the sentence again
+                line = re.sub(r"[ \t]+([.,;:!?])", r"\1", re.sub(r"[ \t]{2,}", " ", line)).rstrip()
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             lines_out.append(line)  # blank lines and headings are structure
@@ -366,17 +370,13 @@ def query_terms(query: str, stopwords: frozenset[str]) -> set[str]:
     return {word for word in WORD.findall(query.lower()) if len(word) >= MIN_TERM_LENGTH and word not in stopwords}
 
 
-@cache
-def _prefix_tokens(tokens: frozenset[str]) -> frozenset[str]:
-    return frozenset(token[:PREFIX_MATCH_LENGTH] for token in tokens if len(token) >= PREFIX_MATCH_LENGTH)
-
-
 def _matched(term: str, tokens: set[str]) -> bool:
     if term in tokens:
         return True
     if len(term) < PREFIX_MATCH_LENGTH:
         return False
-    return term[:PREFIX_MATCH_LENGTH] in _prefix_tokens(frozenset(tokens))
+    prefix = term[:PREFIX_MATCH_LENGTH]
+    return any(len(token) >= PREFIX_MATCH_LENGTH and token[:PREFIX_MATCH_LENGTH] == prefix for token in tokens)
 
 
 def is_relevant(
