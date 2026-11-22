@@ -10,7 +10,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 FactKind = Literal["experience", "project", "education", "skill", "summary"]
-Section = Literal["summary", "skill", "experience", "project"]
+# The model selects and orders these sections only. The header (name, headline, contact) and the education are added by
+# the code from the master CV, so the model cannot write them.
+Section = Literal["skill", "experience", "project"]
 
 
 class Fact(BaseModel):

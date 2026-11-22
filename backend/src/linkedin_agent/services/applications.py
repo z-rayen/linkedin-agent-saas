@@ -20,7 +20,8 @@ from ..core.exceptions import (
 )
 from ..core.settings import get_settings
 from ..cv.build import build_cv_pdf
-from ..cv.grounding import verify_email, verify_grounding
+from ..cv.email import with_signature
+from ..cv.grounding import GroundingProblem, verify_cv, verify_email
 from ..cv.models import MasterCV, TailoredCV, TailoredLine
 from ..domain.applications import (
     SENDING_OR_SENT,
@@ -36,7 +37,6 @@ from ..domain.applications import (
 )
 from ..infra.mail import DryRunMailer, Mailer, OutgoingMessage, new_message_id, validate_address
 
-MAX_PROBLEMS_IN_MESSAGE = 3
 DisplayStatus = Literal["prepared", "approved", "sending", "needs_verification", "sent", "failed", "replied"]
 
 
@@ -75,14 +75,27 @@ def _master_for(db: Session, user_id: int) -> MasterCV:
 # --- content, grounding and the frozen PDF ------------------------------------------
 
 
+LEGACY_SECTION = "summary"  # CVs stored before the model stopped writing a summary: the code now builds the header
+
+
 def tailored_cv_of(application: models.Application) -> TailoredCV | None:
     if not application.tailored_cv_json:
         return None
-    return TailoredCV.model_validate_json(application.tailored_cv_json)
+    raw = json.loads(application.tailored_cv_json)
+    raw["lines"] = [line for line in raw.get("lines", []) if line.get("section") != LEGACY_SECTION]
+    return TailoredCV.model_validate(raw)
 
 
-def problems_of(application: models.Application) -> list[str]:
-    problems: list[str] = json.loads(application.grounding_problems or "[]")
+def problems_of(application: models.Application) -> list[dict[str, str]]:
+    """The stored problems, each one a dict with kind, location, term and message. Problems stored as plain text by an
+    earlier version are returned with kind "legacy", never dropped."""
+    stored = json.loads(application.grounding_problems or "[]")
+    problems: list[dict[str, str]] = []
+    for item in stored:
+        if isinstance(item, dict):
+            problems.append({key: str(item.get(key, "")) for key in ("kind", "location", "term", "message")})
+        else:
+            problems.append({"kind": "legacy", "location": "", "term": "", "message": str(item)})
     return problems
 
 
@@ -104,18 +117,20 @@ def _current_hash(application: models.Application) -> str:
     )
 
 
-def _grounding_problems(application: models.Application, master: MasterCV) -> list[str]:
-    """Every problem in the CV and in the email body, checked against the facts the CV cites."""
+def _grounding_problems(application: models.Application, master: MasterCV) -> list[GroundingProblem]:
+    """Every problem in the CV, its mandatory parts, and the email body, checked against the facts the CV cites."""
     cv = tailored_cv_of(application)
     if cv is None:
-        return ["CV: no tailored CV stored"]
-    cv_problems = verify_grounding(cv, master)
+        return [GroundingProblem("CV: no tailored CV stored", kind="missing_cv", location="CV")]
+    cv_problems = verify_cv(cv, master)
     email_problems = verify_email(application.subject, application.body, cv, master, _job_context(application))
     return cv_problems + email_problems
 
 
 def _refresh_grounding(application: models.Application, master: MasterCV) -> None:
-    application.grounding_problems = json.dumps(_grounding_problems(application, master))
+    application.grounding_problems = json.dumps(
+        [problem.as_dict() for problem in _grounding_problems(application, master)]
+    )
 
 
 def _freeze_pdf(application: models.Application, master: MasterCV) -> None:
@@ -159,7 +174,7 @@ def persist_prepared(db: Session, state: dict[str, object]) -> int:
         job_title=str(state["job_title"]),
         recipient_email=recipient,
         subject=str(state["subject"]),
-        body=str(state["body"]),
+        body=with_signature(str(state["body"]), master),
         status=ApplicationStatus.PREPARED.value,
         tailored_cv_json=str(state["cv_json"]),
         grounding_problems=json.dumps(list(state.get("problems", []))),  # type: ignore[call-overload]
@@ -190,7 +205,7 @@ def edit(
     if subject is not None:
         application.subject = subject
     if body is not None:
-        application.body = body
+        application.body = with_signature(body, master)  # the signature is added by the code, never typed by the user
     if recipient_email is not None:
         application.recipient_email = validate_address(recipient_email)
         application.company_key = company_key(application.recipient_email, settings.free_mail_domains)
@@ -219,11 +234,11 @@ def _transition(application: models.Application, target: ApplicationStatus) -> N
         raise InvalidStateError(f"application is {application.status}: {exc}") from exc
 
 
-def _refusal_message(problems: list[str]) -> str:
-    shown = "; ".join(problems[:MAX_PROBLEMS_IN_MESSAGE])
-    more = len(problems) - MAX_PROBLEMS_IN_MESSAGE
-    suffix = f" (and {more} more)" if more > 0 else ""
-    return f"not approved, claims cannot be traced to the master CV: {shown}{suffix}"
+def _refusal_message(problems: list[dict[str, str]]) -> str:
+    """A count, never a truncated list: the complete list travels in the error's `problems` field."""
+    count = len(problems)
+    noun = "problem" if count == 1 else "problems"
+    return f"not approved: {count} grounding {noun}; each one is listed in problems"
 
 
 def approve(db: Session, application: models.Application) -> models.Application:
@@ -234,7 +249,7 @@ def approve(db: Session, application: models.Application) -> models.Application:
     problems = problems_of(application)
     if problems:
         db.commit()
-        raise CVNotGroundedError(_refusal_message(problems))
+        raise CVNotGroundedError(_refusal_message(problems), problems)
     try:
         _freeze_pdf(application, master)
     except Exception:
@@ -351,7 +366,7 @@ async def send(
     if problems:
         _reset_approval(application)
         db.commit()
-        raise CVNotGroundedError(_refusal_message(problems))
+        raise CVNotGroundedError(_refusal_message(problems), problems)
 
     if real and (confirm_recipient or "").strip().lower() != application.recipient_email.lower():
         raise ValidationFailedError("confirm_recipient must equal the recipient address to send for real")

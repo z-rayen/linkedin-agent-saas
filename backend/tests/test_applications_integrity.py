@@ -115,7 +115,7 @@ def test_email_body_with_an_untraceable_claim_blocks_approval(
     _setup(client, auth_headers)
     answers["email"] = {"subject": "Application for ML Intern", "body": "I led a team of 40 engineers."}
     row = _prepare(client, auth_headers)
-    assert any(problem.startswith("email body:") for problem in row["grounding_problems"])
+    assert any(problem["message"].startswith("email body:") for problem in row["grounding_problems"])
     r = _approve(client, auth_headers, row["id"])
     assert r.status_code == 409
     assert r.json()["code"] == "cv_not_grounded"
@@ -142,7 +142,7 @@ def test_editing_the_email_after_approval_revokes_it_and_regrounds(
     )
     assert r.status_code == 200
     assert r.json()["status"] == "prepared"
-    assert any(problem.startswith("email body:") for problem in r.json()["grounding_problems"])
+    assert any(problem["message"].startswith("email body:") for problem in r.json()["grounding_problems"])
     assert _approve(client, auth_headers, row["id"]).status_code == 409
 
 
@@ -154,7 +154,7 @@ def test_editing_the_cv_after_approval_revokes_it(
     new_lines = [{"section": "experience", "text": "Led a team of 40 engineers", "source_ids": ["exp-1"]}]
     r = client.patch(f"/applications/{row['id']}", json={"cv_lines": new_lines}, headers=auth_headers)
     assert r.json()["status"] == "prepared"
-    assert any("led" in problem for problem in r.json()["grounding_problems"])
+    assert any("led" in problem["message"] for problem in r.json()["grounding_problems"])
 
 
 def test_edit_is_refused_while_the_send_is_in_progress(

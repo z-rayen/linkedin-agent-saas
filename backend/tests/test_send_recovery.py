@@ -26,6 +26,7 @@ SAMPLE = {
     "contact": {"email": "jane@example.com", "phone": "", "location": "", "links": []},
     "facts": [
         {"id": "exp-1", "kind": "experience", "text": "Built a document question-answering service"},
+        {"id": "edu-1", "kind": "education", "text": "MSc in Computer Science"},
         {"id": "skill-py", "kind": "skill", "text": "Python"},
     ],
 }

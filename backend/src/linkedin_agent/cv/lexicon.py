@@ -13,10 +13,21 @@ Four kinds of words:
 
 import unicodedata
 
+# Typographic characters that look like ASCII ones but are not: they are equal for the grounding check and for the
+# LaTeX rendering. Spaces: no-break, narrow no-break and thin. Hyphen: non-breaking. Quotes: curly.
+TYPOGRAPHIC_EQUIVALENTS: dict[str, str] = {
+    " ": " ", " ": " ", " ": " ",
+    "‑": "-", "‐": "-", "‒": "-", "–": "-", "—": "-",
+    "‘": "'", "’": "'", "‚": "'", "‛": "'", "′": "'",
+    "“": '"', "”": '"', "„": '"', "‟": '"', "″": '"',
+}  # fmt: skip
+_TYPOGRAPHY = str.maketrans(TYPOGRAPHIC_EQUIVALENTS)
+
 
 def fold(text: str) -> str:
-    """Lowercase, strip accents, and use straight apostrophes. Used on both sides of every comparison."""
-    normalised = unicodedata.normalize("NFKD", text.replace("’", "'"))
+    """Lowercase, strip accents, and use the ASCII equivalent of typographic characters. Used on both sides of every
+    comparison, so "2 000", "well‑known" and "’" compare as their plain forms."""
+    normalised = unicodedata.normalize("NFKD", text.translate(_TYPOGRAPHY))
     return "".join(char for char in normalised if not unicodedata.combining(char)).lower()
 
 
@@ -46,7 +57,8 @@ SCOPE_CLAIMS: frozenset[str] = frozenset(
 LEVEL_CLAIMS: frozenset[str] = frozenset(
     {
         "bilingue", "couramment", "courant", "expert", "fluent", "fluently", "langue maternelle", "mother tongue",
-        "native", "natif", "proficient",
+        "native", "natif", "proficient", "advanced", "advance", "avance", "avancee", "intermediate", "intermediaire",
+        "beginner", "debutant", "confirme", "confirmee", "senior",
     }
 )  # fmt: skip
 
@@ -67,6 +79,8 @@ _NON_CLAIM_DISPLAY: tuple[str, ...] = (
     "A", "An", "And", "At", "Built", "Created", "Delivered", "Designed", "Designing", "Developed", "Deployed",
     "For", "I", "Implemented", "Improved", "In", "Increased", "Of", "On", "The", "To", "Trained", "Used", "With",
     "Worked", "Reduced", "Participated", "Helped", "Contributed",
+    # Letter politeness: neutral words, asserting nothing about the candidate
+    "Your", "Yours", "Kind", "Respectfully", "Warm", "Warmly",
     # Letters and emails: greetings and closings
     "Dear", "Hello", "Hi", "Hiring", "Team", "Regards", "Sincerely", "Best", "Thank", "Thanks", "Subject",
     "Application", "Position", "Role", "Opportunity",
@@ -77,6 +91,7 @@ _NON_CLAIM_DISPLAY: tuple[str, ...] = (
     "Participe", "Contribue", "Aide", "Realise", "Travaille", "Cree", "Optimise", "Reduit", "Utilise", "Mise",
     # French letters
     "Bonjour", "Madame", "Monsieur", "Cordialement", "Candidature", "Objet",
+    "Merci", "Bien", "Salutations", "Veuillez", "Recevez", "Sinceres", "Distinguees", "Respectueusement",
 )  # fmt: skip
 
 NON_CLAIM_FOLDED: frozenset[str] = frozenset(fold(word) for word in _NON_CLAIM_DISPLAY)

@@ -220,6 +220,38 @@ class Settings(BaseSettings):
     research_context_max_chars: int = Field(default=9000, ge=1000)
     # Retries of each structured step (plan, reflection) when its answer does not validate.
     research_structured_retries: int = Field(default=1, ge=0)
+
+    # Watch graph (graphs/watch_graph.py): the background search for offers and certifications.
+    # Queries are built from these templates and the profile: {field}, {level}, {offer_type}, {region}, {language}.
+    watch_query_templates: list[str] = Field(
+        default_factory=lambda: [
+            "{offer_type} {field} {region}",
+            "{field} {offer_type} {level} {language}",
+            "{offer_type} {field} certification {region}",
+        ]
+    )
+    watch_default_offer_type: str = "end-of-studies internship"  # used when the profile has none
+    watch_max_queries: int = Field(default=4, ge=1)
+    watch_max_regions: int = Field(default=2, ge=1)  # regions of the profile used in the queries
+    watch_results_per_query: int = Field(default=5, ge=1)
+    watch_max_candidates: int = Field(default=12, ge=1)  # distinct new links that are scored at most
+    watch_max_pages: int = Field(default=4, ge=0)  # pages fetched in full over the run; the rest stay snippets
+    watch_page_max_chars: int = Field(default=1500, ge=200)
+    watch_batch_size: int = Field(default=6, ge=1)  # candidates per structured scoring or routing call
+    watch_route_text_chars: int = Field(
+        default=400, ge=0
+    )  # text per candidate in the routing call (title and link first)
+    watch_snippet_score_cap: int = Field(default=60, ge=0, le=100)  # a snippet-only result never scores above this
+    watch_structured_retries: int = Field(default=1, ge=0)
+    watch_min_relevance: float = Field(default=0.3, ge=0, le=1)
+    watch_min_title_matches: int = Field(default=1, ge=0)
+
+    # Retention and streaming (see services/retention.py and services/stream_tickets.py).
+    result_retention_days: int = Field(default=365, ge=1)  # stored run results and watch results older than this
+    stream_ticket_seconds: int = Field(default=60, ge=5, le=600)  # a progress-stream ticket is valid this long, once
+    stream_poll_seconds: float = Field(default=1.0, gt=0)  # how often a progress stream reads the run
+    stream_max_seconds: float = Field(default=1800.0, gt=0)  # a stream ends after this, even if the run does not
+    result_purge_interval_seconds: float = Field(default=86400.0, gt=0)  # how often the retention job runs
     # A search result is off-topic unless it matches at least this share of the query's topic words, in its title,
     # summary or domain. Off-topic results are not read, not shown and not cited. 0 keeps everything.
     research_min_relevance: float = Field(default=0.3, ge=0, le=1)

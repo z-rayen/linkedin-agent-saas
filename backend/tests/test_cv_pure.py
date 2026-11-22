@@ -50,7 +50,7 @@ def test_model_output_cannot_inject_latex_commands(master: MasterCV) -> None:
 
 
 def test_rendered_document_has_no_unfilled_placeholders(master: MasterCV) -> None:
-    cv = tailored(("summary", "Machine learning engineer", ["sum-1"]))
+    cv = tailored(("skill", "Machine learning engineer", ["sum-1"]))
     source = render_cv(master, cv)
     assert "$" not in source.replace(r"\$", "")
     assert "\\begin{document}" in source and "\\end{document}" in source
@@ -64,7 +64,7 @@ def test_empty_sections_are_omitted(master: MasterCV) -> None:
 
 
 def test_contact_and_name_are_rendered(master: MasterCV) -> None:
-    source = render_cv(master, tailored(("summary", "Engineer", ["sum-1"])))
+    source = render_cv(master, tailored(("skill", "Engineer", ["sum-1"])))
     assert "Jane Doe" in source
     assert "jane.doe@example.com" in source
 

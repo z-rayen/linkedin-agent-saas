@@ -68,6 +68,29 @@ jobs:
           name: coverage-xml
           path: backend/coverage.xml
 
+  cv-compile:
+    # The opt-in Tectonic tests, required here: REQUIRE_TECTONIC=1 makes a missing binary an error, never a skip.
+    # Tectonic is installed exactly as the Docker image installs it: pinned version, checksum verified.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TECTONIC_VERSION: "0.17.0"
+      TECTONIC_SHA256_AMD64: "8533d07f9ccbd7a65824b9e0459041bca34af1eb33daba48f59215593753a3b7"
+      TARGETARCH: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install the pinned Tectonic (checksum-verified)
+        run: sudo --preserve-env=TARGETARCH,TECTONIC_VERSION,TECTONIC_SHA256_AMD64 python3 docker/install_tectonic.py
+      - run: uv sync
+      - name: Real CV compilations
+        run: uv run pytest tests/test_cv_tectonic_integration.py -q -rs
+        env:
+          TEST_TECTONIC_PATH: /usr/local/bin/tectonic
+          REQUIRE_TECTONIC: "1"
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:

@@ -26,8 +26,8 @@ from .core.settings import Settings, get_settings, retired_variable_warnings
 from .cv.compile import ensure_tectonic_at_startup
 from .infra.checkpoint import checkpointer_lifespan
 from .infra.embeddings import get_embedder
-from .routers import agent, applications, apply, auth, content, engage, oauth, profile, watch
-from .services import preparations, research_runs
+from .routers import agent, applications, apply, auth, content, engage, oauth, profile, runs, watch
+from .services import preparations, research_runs, retention
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -68,7 +68,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # A restart must not leave a preparation stuck: stale runs are resumed from their checkpoint or failed.
         await preparations.recover_interrupted()
         await research_runs.recover_interrupted()
-        yield
+        purge = asyncio.create_task(retention.purge_forever())  # retention: once now, then periodically
+        try:
+            yield
+        finally:
+            purge.cancel()
 
 
 warn_about_retired_variables()
@@ -87,7 +91,9 @@ app = FastAPI(
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """Map domain errors to HTTP responses. Keeps the `detail` field the frontend already reads."""
-    return UTF8JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "code": exc.code})
+    return UTF8JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.message, "code": exc.code, **exc.details}
+    )
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -118,6 +124,7 @@ app.include_router(agent.router)
 app.include_router(engage.router)
 app.include_router(apply.router)
 app.include_router(applications.router)
+app.include_router(runs.router)
 
 
 @app.get("/")

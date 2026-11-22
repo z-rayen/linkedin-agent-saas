@@ -20,15 +20,17 @@ PROMPTS_DIR = Path(__file__).parent
 # Fields that carry text from job pages, search results or model output derived from them.
 UNTRUSTED_FIELDS: dict[str, frozenset[str]] = {
     "analyze_job.v1": frozenset({"job_title", "job_text"}),
-    "cv_tailor.v2": frozenset({"job_title", "job_text", "feedback"}),
+    "cv_tailor.v3": frozenset({"job_title", "job_text", "feedback"}),
     "cv_section.v1": frozenset({"job_title", "job_text"}),
-    "application_email.v1": frozenset({"job_title", "feedback"}),
+    "application_email.v2": frozenset({"job_title", "feedback"}),
     "score_item.v1": frozenset({"title", "summary"}),
     "cover_letter.v1": frozenset({"title", "summary"}),
     "research_answer.v1": frozenset({"sources"}),
     "research_answer.v3": frozenset({"sources", "history"}),
     "planner.v2": frozenset({"history"}),
     "research_reflect.v1": frozenset({"evidence"}),
+    "watch_score.v1": frozenset({"candidates"}),
+    "watch_route.v1": frozenset({"candidates"}),
     "engage_comment.v1": frozenset({"post_title", "post_summary"}),
     "linkedin_post.v1": frozenset({"findings"}),
 }

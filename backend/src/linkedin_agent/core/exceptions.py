@@ -9,9 +9,10 @@ class AppError(Exception):
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
     code: str = "internal_error"
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, details: dict[str, object] | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.details: dict[str, object] = details or {}  # extra fields of the HTTP error body, such as a full list
 
 
 class NotFoundError(AppError):
@@ -92,10 +93,16 @@ class InvalidStateError(AppError):
 
 
 class CVNotGroundedError(AppError):
-    """The tailored CV has claims that cannot be traced to the master CV. Approval is refused until they are fixed."""
+    """The tailored CV has claims that cannot be traced to the master CV. Approval is refused until they are fixed.
+
+    `problems` is the complete list, each one a dict with kind, location, term and message. It is never truncated.
+    """
 
     status_code = status.HTTP_409_CONFLICT
     code = "cv_not_grounded"
+
+    def __init__(self, message: str, problems: list[dict[str, str]] | None = None) -> None:
+        super().__init__(message, {"problems": list(problems or [])})
 
 
 class ContentChangedError(AppError):

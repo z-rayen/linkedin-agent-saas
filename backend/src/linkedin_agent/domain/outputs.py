@@ -35,6 +35,32 @@ class PlannerOutput(BaseModel):
         return UNKNOWN_INTENT_FALLBACK
 
 
+class WatchScoreItem(BaseModel):
+    """The model's reading of one watch candidate, by its position in the batch it was given."""
+
+    index: int = Field(ge=1)
+    relevance: int = Field(ge=0, le=100)
+    justification: str = Field(default="", max_length=300)
+    company: str = Field(default="", max_length=200)  # as written in the text, or empty
+    job_title: str = Field(default="", max_length=200)  # as written in the text, or empty
+
+
+class WatchScoreOutput(BaseModel):
+    items: list[WatchScoreItem] = Field(default_factory=list, max_length=20)
+
+
+WATCH_CATEGORIES = ("job", "certification", "other")
+
+
+class WatchRouteItem(BaseModel):
+    index: int = Field(ge=1)
+    category: Literal["job", "certification", "other"]
+
+
+class WatchRouteOutput(BaseModel):
+    items: list[WatchRouteItem] = Field(default_factory=list, max_length=20)
+
+
 class ReflectOutput(BaseModel):
     """Research agent reflection: is the evidence enough, and if not, which queries would fill the gaps."""
 

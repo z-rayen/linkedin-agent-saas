@@ -59,7 +59,7 @@ class PreparationState(TypedDict, total=False):
     cv_json: str  # validated TailoredCV
     subject: str
     body: str
-    problems: list[str]  # the exact problems of the last check
+    problems: list[dict[str, str]]  # the exact problems of the last check: kind, location, term, message
     revisions: int
     feedback: str
     application_id: int
@@ -84,6 +84,18 @@ class GraphDeps:
 
 class PreparationError(Exception):
     """A preparation that cannot continue for a reason the user must act on."""
+
+
+def _problem_dict(problem: object) -> dict[str, str]:
+    """A problem as the graph keeps it: a plain dict, which survives the checkpoint and the storage unchanged."""
+    if hasattr(problem, "as_dict"):
+        return dict(problem.as_dict())
+    return {"kind": "unknown", "location": "", "term": "", "message": str(problem)}
+
+
+def _revisable(state: "PreparationState") -> list[dict[str, str]]:
+    """The problems a revision can fix: every kind except "mandatory" (a missing part of the master CV)."""
+    return [problem for problem in state.get("problems", []) if problem.get("kind") != "mandatory"]
 
 
 def augmented_master(master_json: str, knowledge: list[str]) -> MasterCV:
@@ -163,17 +175,19 @@ def build_graph(deps: GraphDeps, checkpointer: Any = None) -> Any:
     async def verify(state: PreparationState) -> dict[str, Any]:
         cv = TailoredCV.model_validate_json(state["cv_json"])
         context = " ".join(part for part in (state["job_title"], state.get("company") or "") if part)
-        problems = deps.verify(cv, state["subject"], state["body"], _master(state), context)
+        problems = [_problem_dict(p) for p in deps.verify(cv, state["subject"], state["body"], _master(state), context)]
         return {"problems": problems}
 
     def after_verify(state: PreparationState) -> str:
-        if state.get("problems") and state.get("revisions", 0) < deps.max_revisions:
+        if _revisable(state) and state.get("revisions", 0) < deps.max_revisions:
             return "revise"
         return "persist_prepared"
 
     async def revise(state: PreparationState) -> dict[str, Any]:
         # The exact problems go back to the model as data. The check itself is never relaxed.
-        return {"revisions": state.get("revisions", 0) + 1, "feedback": "\n".join(state.get("problems", []))}
+        # Only what the model can fix is sent back. A missing part of the master CV is not a revision matter.
+        feedback = "\n".join(problem["message"] for problem in _revisable(state))
+        return {"revisions": state.get("revisions", 0) + 1, "feedback": feedback}
 
     async def persist_prepared(state: PreparationState) -> dict[str, Any]:
         return {"application_id": await deps.persist(state)}

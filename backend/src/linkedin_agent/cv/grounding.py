@@ -2,30 +2,73 @@
 
 Deterministic on purpose: no model judges the output. A text is checked against the facts it cites:
 1. every cited id exists;
-2. every number appears in the cited facts (or in the job context, for the email);
+2. every number appears in the cited facts, compared by value ("2,000", "2000" and "2 000" are the same; "3" and "30"
+   are not);
 3. every capitalised term appears in the cited facts (or in the job context, for the email);
 4. every technology name appears in the cited facts, in any case, accents folded;
-5. every scope, level or degree claim (led, dirigé, fluent, courant, master) appears in the cited facts.
+5. every scope, level or degree claim (led, dirigé, proficient, courant, master) appears in the cited facts;
+6. no unfilled placeholder remains ("[Your Name]", "{company}", "<role>").
+
+The CV also has mandatory parts that come from the master CV and are never written by the model: a headline, a contact
+email, and at least one education fact. A CV without them cannot be approved.
 
 The job context (title, company) is allowed for numbers and proper terms only: it describes the job,
 not the candidate. A technology or a claim taken from the job description is never accepted as a fact
 about the candidate.
 
+Every problem is a GroundingProblem: a message (the text a person reads), a kind, a location and the offending term.
 Known limits are documented as xfail cases in the tests: unlisted technologies, unlisted synonyms,
 and meaning changes that reuse the same words.
 """
 
 import re
 
+from .email import without_signature
 from .lexicon import CLAIM_WORDS, NON_CLAIM_FOLDED, TECHNOLOGIES, fold
 from .models import MasterCV, TailoredCV
 
-NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+# Digits grouped by spaces (regular, no-break, narrow no-break, thin), dots or commas, or a plain number with a decimal.
+GROUPING = r"[ ,.   ]"
+NUMBER = re.compile(rf"\d{{1,3}}(?:{GROUPING}\d{{3}})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
 CAPITALISED = re.compile(r"\b[A-ZÀ-Ý][\w+#.\-]*[\w+#]\b")
+PLACEHOLDER = re.compile(r"\[[^\]\n]*\]|\{\{?[^}\n]*\}?\}|<[^>\n]{1,80}>")
+MAX_PLACEHOLDER_CHARS = 80
+
+
+class GroundingProblem(str):
+    """One problem, as a string (the message a person reads) that also carries its kind, location and offending term.
+
+    Existing callers keep working on the string. The API and the storage use `as_dict()`.
+    """
+
+    kind: str
+    location: str
+    term: str
+
+    def __new__(cls, message: str, *, kind: str, location: str, term: str = "") -> "GroundingProblem":
+        problem = super().__new__(cls, message)
+        problem.kind = kind
+        problem.location = location
+        problem.term = term
+        return problem
+
+    def as_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "location": self.location, "term": self.term, "message": str(self)}
 
 
 def _normalise_number(value: str) -> str:
-    return value.replace(",", ".")
+    """The value of a number, as a canonical string. Grouping separators are removed; a decimal comma or point is kept.
+
+    "2,000", "2000", "2 000" and "2.000" are one value; "2,5" and "2.5" are 2.5; "3" and "30" stay different.
+    """
+    compact = re.sub(r"[\s   ]", "", value)
+    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", compact):
+        return str(int(re.sub(r"[.,]", "", compact)))
+    grouped_with_decimals = re.fullmatch(r"(\d{1,3}(?:[.,]\d{3})+)[.,](\d+)", compact)
+    if grouped_with_decimals:
+        whole = int(re.sub(r"[.,]", "", grouped_with_decimals.group(1)))
+        return f"{whole}.{grouped_with_decimals.group(2)}"
+    return f"{float(compact.replace(',', '.')):.10g}"
 
 
 def _word_pattern(word_folded: str) -> re.Pattern[str]:
@@ -47,52 +90,88 @@ def contains_term(haystack: str, term: str) -> bool:
     return _contains_word(fold(haystack), term)
 
 
-def check_text(text: str, cited_text: str, label: str, context_text: str = "") -> list[str]:
+def check_text(text: str, cited_text: str, label: str, context_text: str = "") -> list[GroundingProblem]:
     """Problems in `text` that the `cited_text` (and, for numbers and proper terms, `context_text`) do not support."""
     cited_folded = fold(cited_text)
     context_folded = fold(context_text)
     cited_numbers = {_normalise_number(n) for n in NUMBER.findall(cited_text)}
     context_numbers = {_normalise_number(n) for n in NUMBER.findall(context_text)}
     text_folded = fold(text)
-    problems: dict[str, None] = {}  # ordered set: the same problem is reported once
+    problems: dict[str, GroundingProblem] = {}  # ordered set: the same problem is reported once
+
+    def add(message: str, kind: str, term: str) -> None:
+        problems.setdefault(message, GroundingProblem(message, kind=kind, location=label, term=term))
+
+    for placeholder in PLACEHOLDER.findall(text):
+        add(f"{label}: unfilled placeholder '{placeholder}' must be replaced or removed", "placeholder", placeholder)
 
     for number in NUMBER.findall(text):
         normalised = _normalise_number(number)
         if normalised not in cited_numbers and normalised not in context_numbers:
-            problems[f"{label}: number '{number}' does not appear in the cited facts"] = None
+            add(f"{label}: number '{number}' does not appear in the cited facts", "number", number)
 
     for term in CAPITALISED.findall(text):
         term = term.rstrip(".")
         if fold(term) in NON_CLAIM_FOLDED:
             continue
         if not (_contains_word(cited_folded, term) or _contains_word(context_folded, term)):
-            problems[f"{label}: term '{term}' does not appear in the cited facts"] = None
+            add(f"{label}: term '{term}' does not appear in the cited facts", "term", term)
 
     for tech in sorted(TECHNOLOGIES):
         if _contains_word(text_folded, tech) and not _contains_word(cited_folded, tech):
-            problems[f"{label}: technology '{tech}' does not appear in the cited facts"] = None
+            add(f"{label}: technology '{tech}' does not appear in the cited facts", "technology", tech)
 
     for claim in sorted(CLAIM_WORDS):
         if _contains_word(text_folded, claim) and not _contains_word(cited_folded, claim):
-            problems[f"{label}: claim '{claim}' (scope, level or degree) is not supported by the cited facts"] = None
+            add(
+                f"{label}: claim '{claim}' (scope, level or degree) is not supported by the cited facts",
+                "claim",
+                claim,
+            )
 
-    return list(problems)
+    return list(problems.values())
 
 
-def verify_grounding(cv: TailoredCV, master: MasterCV) -> list[str]:
-    """Problems in the tailored CV. Every line, in every section, must cite facts that support it."""
+def verify_grounding(cv: TailoredCV, master: MasterCV) -> list[GroundingProblem]:
+    """Problems in the tailored CV. Every line must cite facts that support it."""
     facts = master.facts_by_id()
-    problems: dict[str, None] = {}
+    problems: dict[str, GroundingProblem] = {}
     for index, line in enumerate(cv.lines, start=1):
         label = f"line {index}"
         unknown = [source for source in line.source_ids if source not in facts]
         if unknown:
-            problems[f"{label}: unknown source id(s) {', '.join(unknown)}"] = None
+            message = f"{label}: unknown source id(s) {', '.join(unknown)}"
+            problems[message] = GroundingProblem(
+                message, kind="unknown_source", location=label, term=", ".join(unknown)
+            )
             continue
         cited = " ".join(facts[source].text for source in line.source_ids)
         for problem in check_text(line.text, cited, label):
-            problems[problem] = None
-    return list(problems)
+            problems[problem] = problem
+    return list(problems.values())
+
+
+def verify_mandatory(master: MasterCV) -> list[GroundingProblem]:
+    """The parts the CV must have and that the code takes from the master CV: headline, contact email, education."""
+    label = "master CV"
+    missing: list[tuple[str, str]] = []
+    if not master.headline.strip():
+        missing.append(("headline is empty", "headline"))
+    if not master.contact.email.strip():
+        missing.append(("contact email is empty", "contact email"))
+    if not any(fact.kind == "education" for fact in master.facts):
+        missing.append(("no education fact", "education"))
+    return [
+        GroundingProblem(
+            f"{label}: {reason}; the CV cannot be approved without it", kind="mandatory", location=label, term=term
+        )
+        for reason, term in missing
+    ]
+
+
+def verify_cv(cv: TailoredCV, master: MasterCV) -> list[GroundingProblem]:
+    """Every problem of the CV: its lines, and the mandatory parts that the code adds from the master CV."""
+    return verify_grounding(cv, master) + verify_mandatory(master)
 
 
 def cited_text_of(cv: TailoredCV, master: MasterCV) -> str:
@@ -102,17 +181,19 @@ def cited_text_of(cv: TailoredCV, master: MasterCV) -> str:
     return " ".join(facts[source].text for source in ids if source in facts)
 
 
-def verify_email(subject: str, body: str, cv: TailoredCV, master: MasterCV, job_context: str) -> list[str]:
+def verify_email(subject: str, body: str, cv: TailoredCV, master: MasterCV, job_context: str) -> list[GroundingProblem]:
     """Problems in the application email, checked against every fact the tailored CV cites.
 
+    The signature is built by the code from the master CV, so it is not checked as a claim; the body the model wrote is.
     `job_context` (job title, company) is allowed for proper terms and numbers only.
     """
-    return check_text(f"{subject}\n{body}", cited_text_of(cv, master), "email body", job_context)
+    written = without_signature(body, master)
+    return check_text(f"{subject}\n{written}", cited_text_of(cv, master), "email body", job_context)
 
 
-def check_output(cv: TailoredCV, subject: str, body: str, master: MasterCV, job_context: str) -> list[str]:
-    """Every problem in the candidate's output: the CV lines and the email, against the facts the CV cites.
+def check_output(cv: TailoredCV, subject: str, body: str, master: MasterCV, job_context: str) -> list[GroundingProblem]:
+    """Every problem in the candidate's output: the CV and the email, against the facts the CV cites.
 
     This is the single gate that the application graph, the approval service and the tests all use.
     """
-    return verify_grounding(cv, master) + verify_email(subject, body, cv, master, job_context)
+    return verify_cv(cv, master) + verify_email(subject, body, cv, master, job_context)

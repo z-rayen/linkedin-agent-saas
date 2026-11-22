@@ -70,7 +70,8 @@ def test_invalid_cv_structure_fails_with_a_user_message(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The reported failure: the model keeps answering with a section that does not exist (education)."""
-    bad = json.dumps({"lines": [{"section": "education", "text": "Diplome d'ingenieur", "source_ids": ["edu-1"]}]})
+    # The answer that failed in the field: the schema forbids "education" on purpose.
+    bad = '{"lines": [{"section": "education", "text": "Diplome", "source_ids": ["edu-1"]}]}'  # forbidden on purpose
     fake = _use_fake_llm(monkeypatch, bad)
     with caplog.at_level(logging.WARNING, logger="linkedin_agent.infra.llm"), pytest.raises(CVStructureError) as info:
         asyncio.run(tailor_cv("ML Intern", "job", load_master_cv(SAMPLE_MASTER)))

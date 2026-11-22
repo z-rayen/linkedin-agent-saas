@@ -141,7 +141,35 @@ def get_preparation(
     run = preparations.find_run(db, current_user.id, run_id)
     if run is None:
         raise http_error(NotFoundError("Preparation not found"))
-    return preparations.status_of(run, utcnow(), get_settings().preparation_stale_seconds)
+    status = preparations.status_of(run, utcnow(), get_settings().preparation_stale_seconds)
+    if run.application_id is not None:
+        application = db.get(models.Application, run.application_id)
+        if application is not None:
+            status["grounding"] = _grounding_status(run.status, service.problems_of(application))
+    return status
+
+
+def _grounding_status(run_status: str, problems: list[dict[str, str]]) -> dict[str, Any]:
+    """What the review still has to fix. A prepared application with problems left has used its revision budget:
+    the graph only stops with problems when the revisions are exhausted. Mandatory parts are never revised by
+    the model."""
+    revisable = [problem for problem in problems if problem["kind"] != "mandatory"]
+    revision_limit_reached = run_status == "awaiting_review" and bool(revisable)
+    if revision_limit_reached:
+        message = (
+            f"The model's revisions are used up and {len(revisable)} grounding "
+            f"{'problem remains' if len(revisable) == 1 else 'problems remain'}: "
+            "fix them in the review before approval."
+        )
+    elif problems:
+        message = f"{len(problems)} grounding problem(s): the mandatory parts of the CV are missing from the master CV."
+    else:
+        message = "No grounding problem."
+    return {
+        "problems": len(problems),
+        "revision_limit_reached": revision_limit_reached,
+        "message": message,
+    }
 
 
 @router.get("")

@@ -140,12 +140,12 @@ def test_injected_instruction_cannot_pass_by_citing_an_unrelated_fact() -> None:
 # Summary and skills follow the same citation rule as experience ----------------
 
 
-@pytest.mark.parametrize("section", ["summary", "skill", "experience", "project"])
+@pytest.mark.parametrize("section", ["skill", "experience", "project"])
 def test_every_section_is_checked(section: str) -> None:
     assert _problems(section, "Built a RAG chatbot over 30 years", "exp-rag") != []
 
 
-@pytest.mark.parametrize("section", ["summary", "skill", "experience", "project"])
+@pytest.mark.parametrize("section", ["skill", "experience", "project"])
 def test_every_section_requires_a_source(section: str) -> None:
     with pytest.raises(ValueError):
         TailoredCV.model_validate({"lines": [{"section": section, "text": "Python", "source_ids": []}]})

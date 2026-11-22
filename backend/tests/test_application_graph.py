@@ -67,7 +67,7 @@ class Fakes:
         self.tailor_feedback.append(feedback)
         self.tailor_prompts.append(
             render(
-                "cv_tailor.v2",
+                "cv_tailor.v3",
                 job_title=job_title,
                 job_text=job_text,
                 facts="\n".join(f"[{f.id}] ({f.kind}) {f.text}" for f in master.facts),

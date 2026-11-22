@@ -1,6 +1,7 @@
 """Tailor a master CV to one job: model proposes, grounding check decides what a human must look at."""
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,7 @@ JOB_TEXT_MAX_CHARS = 3000
 @dataclass(frozen=True)
 class TailoringResult:
     cv: TailoredCV
-    problems: list[str]
+    problems: Sequence[str]
 
     @property
     def grounded(self) -> bool:
@@ -26,7 +27,7 @@ class TailoringResult:
 async def tailor_cv(job_title: str, job_text: str, master: MasterCV, feedback: str = "(none)") -> TailoringResult:
     facts = "\n".join(f"[{fact.id}] ({fact.kind}) {fact.text}" for fact in master.facts)
     prompt = render(
-        "cv_tailor.v2",
+        "cv_tailor.v3",
         job_title=job_title,
         job_text=job_text[:JOB_TEXT_MAX_CHARS],
         facts=facts,

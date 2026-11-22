@@ -14,6 +14,8 @@ from linkedin_agent.graphs.application_graph import GraphDeps
 from linkedin_agent.graphs.application_graph import build_graph as build_application_graph
 from linkedin_agent.graphs.research_graph import ResearchDeps, ResearchLimits
 from linkedin_agent.graphs.research_graph import build_graph as build_research_graph
+from linkedin_agent.graphs.watch_graph import WatchDeps, WatchLimits
+from linkedin_agent.graphs.watch_graph import build_graph as build_watch_graph
 
 GRAPHS_DIR = Path(__file__).resolve().parents[1] / "docs" / "graphs"
 
@@ -89,9 +91,39 @@ def export_research_graph() -> None:
     )
 
 
+def export_watch_graph() -> None:
+    deps = WatchDeps(
+        search=_unused,
+        read=_unused,
+        score=_unused,
+        route=_unused,
+        known_links=_unused,
+        persist=_unused,
+        on_step=_unused,
+        limits=WatchLimits(
+            max_queries=4,
+            max_regions=2,
+            results_per_query=5,
+            max_candidates=12,
+            max_pages=4,
+            page_max_chars=1500,
+            batch_size=6,
+            snippet_score_cap=60,
+            min_score=50,
+            min_relevance=0.3,
+            min_title_matches=1,
+            templates=(),
+        ),
+        stopwords=frozenset(),
+    )
+    diagram = build_watch_graph(deps).get_graph().draw_mermaid()
+    _write(GRAPHS_DIR / "watch_graph.md", "Watch graph", "backend/src/linkedin_agent/graphs/watch_graph.py", diagram)
+
+
 def main() -> None:
     export_application_graph()
     export_research_graph()
+    export_watch_graph()
 
 
 if __name__ == "__main__":

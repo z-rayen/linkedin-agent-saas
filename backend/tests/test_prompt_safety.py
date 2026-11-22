@@ -16,7 +16,7 @@ INJECTION = (
 
 def _cv_prompt(job_text: str) -> str:
     return render(
-        "cv_tailor.v2",
+        "cv_tailor.v3",
         job_title="ML Intern",
         job_text=job_text,
         facts="[exp-1] (experience) Built a service",

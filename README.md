@@ -56,6 +56,29 @@ through `infra/search.py` and `infra/embeddings.py`.
 Preparing an application runs in the background as a LangGraph workflow. Its diagram is generated from the code:
 [docs/graphs/application_graph.md](docs/graphs/application_graph.md) (regenerate with `scripts/export_graph_mermaid.py`).
 
+**What the model writes, and what the code adds.** The model writes the email body and selects, orders and rephrases
+the skills, experience and projects. The code adds the rest:
+
+- the **header** (name, headline, contact line) and the **education**, from the master CV. A master CV without a
+  headline, a contact email or an education fact cannot be approved (kind `mandatory`);
+- the **signature** of the email (name and contact line), appended to the body. The model never writes a closing, a
+  signature or a placeholder such as `[Your Name]`; a placeholder left in the text is a problem of kind `placeholder`.
+
+**Grounding problems** are returned as a structured list, never truncated: each one has a `kind` (`number`, `term`,
+`technology`, `claim`, `placeholder`, `unknown_source`, `mandatory`), a `location` (`line 3`, `email body`,
+`master CV`), the offending `term`, and a `message`. The approval refusal (409, `cv_not_grounded`) carries the complete
+list in `problems`.
+
+**Figures** are compared by value: `2,000`, `2000` and `2 000` are the same number; `3` and `30` are not. **Words**: the
+neutral words of a letter (Your, Dear, Best, Regards, Thank, and their French equivalents) assert nothing; level and
+scope words (proficient, expert, advanced, led, managed, fluent...) are claims that the master CV must support.
+**Typography**: no-break and narrow spaces, non-breaking hyphens and curly quotes are compared and rendered as their
+plain equivalents. A compile that reports a missing glyph is refused, so the PDF never has a blank where a character
+should be.
+
+**Revisions.** When the revision budget is used up with problems left, the preparation status says so
+(`grounding.revision_limit_reached`), and the application stays in review with its problems listed.
+
 ### The asynchronous flow
 
 Preparation takes minutes, so the API does not wait for it. Every step is a separate request:
@@ -298,6 +321,48 @@ on your own data.
 and keep every value. Its downgrade refuses to run while research runs exist, because dropping `kind` would turn them
 into application runs. Delete them first if you really want the downgrade. See `docs/adr/0002-research-run-table.md`.
 
+## Watch: background search for offers and certifications
+
+The watch graph (`backend/src/linkedin_agent/graphs/watch_graph.py`, diagram `docs/graphs/watch_graph.md`) searches the web
+from your profile, scores what it finds, and keeps what is worth a look. It is one pass:
+`search -> dedupe -> read -> score -> route -> persist`. It never submits an application and never sends a message:
+results are a list you review. An offer can be handed to the application preparation by you, never by the watch.
+
+- **Queries** come from the profile and `WATCH_QUERY_TEMPLATES`; no result text becomes a query.
+- **Dedupe** by canonical link (no `www.`, no fragment, no tracking parameter, sorted parameters).
+- **Scoring** reads the text of at most `WATCH_MAX_PAGES` pages, `WATCH_PAGE_MAX_CHARS` characters each. A result whose page
+  could not be read (a 403, a timeout) is stored with a visible **unverified** flag and its score capped at
+  `WATCH_SNIPPET_SCORE_CAP`. A company or title the model names must be in the text it was judged on, or it is blank.
+- **Routing** classifies each result as a job, a certification or other; other is dropped. Results below
+  `MIN_MATCH_SCORE` are not stored.
+
+**Limits (settings).** `WATCH_MAX_QUERIES` (4), `WATCH_MAX_REGIONS` (2), `WATCH_RESULTS_PER_QUERY` (5),
+`WATCH_MAX_CANDIDATES` (12), `WATCH_MAX_PAGES` (4), `WATCH_PAGE_MAX_CHARS` (1500), `WATCH_BATCH_SIZE` (6),
+`WATCH_SNIPPET_SCORE_CAP` (60), `WATCH_STRUCTURED_RETRIES` (1), `WATCH_ROUTE_TEXT_CHARS` (400).
+
+**Cost, with the defaults.** At most **8 LLM calls** per run: 2 scoring batches and 2 routing batches, one retry each
+(`worst_case_llm_calls()`). At 8000 tokens per minute, a typical run takes about 1 to 2 minutes and the worst case about 5
+to 6 minutes (estimates: check the `watch node=... duration_ms=...` logs on your data).
+
+**Progress streams.** `POST /runs/{run_id}/stream-ticket` returns a ticket valid for `STREAM_TICKET_SECONDS` (60),
+for that run and that user, usable once. Open `GET /runs/{run_id}/events?ticket=...` for server-sent events:
+`progress` (step and status on each change), `done`, `timeout`. The login token never appears in a URL. The events carry
+no prompt, answer, query or page text. Polling stays available with `GET /runs/{run_id}`.
+A ticket lives in the memory of one process: with several API workers, a ticket must be opened on the worker that issued
+it. A shared store is the fix, to be decided with the multi-worker deployment.
+
+**Retention.** Finished research and watch runs, their checkpoints, and watch results older than
+`RESULT_RETENTION_DAYS` (365) are purged at startup and every `RESULT_PURGE_INTERVAL_SECONDS` (one day). Running runs
+and applications are never purged by this job.
+
+**Deleting an account.** `DELETE /auth/account` with `{"password": "..."}` removes the account and every row that belongs
+to it (profile, knowledge, runs, results, applications, messages, tokens, checkpoints), in one transaction. Another user's
+data is untouched. A wrong password removes nothing.
+
+**Not yet wired.** The watch as a background run (`POST /watch/runs`) and the new profile fields (regions, languages,
+offer type) need two schema migrations; see `docs/adr/0003-watch-graph-streams-retention.md`. Until they are accepted, the
+synchronous `POST /watch/run` keeps its behaviour and its contract.
+
 ## Sending email
 
 - **Dry-run is the default.** Nothing is sent. Each send runs every check, then stops.
@@ -357,9 +422,9 @@ Tests never use the network and never touch your development database: they run 
   -e POSTGRES_PASSWORD=test -e POSTGRES_DB=linkedin_test pgvector/pgvector:pg16`, then
   `$env:TEST_DATABASE_URL = "postgresql://test:test@localhost:5433/linkedin_test"`.
 
-### Real LaTeX compilation test (optional)
+### Real LaTeX compilation tests
 
-One test compiles the sample CV with the real Tectonic binary. It is skipped unless you point the
+Three tests compile CVs with the real Tectonic binary and read the PDF text back: the sample CV (header, education and contact built from the master CV, the model's lines), a CV with typographic characters and an accented name, and a character the font lacks, which must be refused. They are skipped unless you point the
 `TEST_TECTONIC_PATH` environment variable at the binary. The test suite does not read `TECTONIC_PATH` from
 `backend/.env`, so the setting must be given explicitly for this run:
 
@@ -370,5 +435,5 @@ $env:TEST_TECTONIC_PATH = "C:\tools\tectonic\tectonic.exe"   # full path to your
 Remove-Item Env:TEST_TECTONIC_PATH
 ```
 
-Without the variable the test reports `skipped` with the reason. The first run downloads LaTeX packages, so it
+Without the variable the tests report `skipped` with the reason. In CI, the job `cv-compile` installs the pinned Tectonic (checksum-verified, as the Docker image does) and sets `REQUIRE_TECTONIC=1`: then a missing binary is an error, never a skip. A unit test also checks that no test builds a CV with a section the schema forbids. The first run downloads LaTeX packages, so it
 needs the network; the test itself does not use the network once they are cached.

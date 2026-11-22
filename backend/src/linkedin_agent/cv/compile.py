@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 SOURCE_NAME = "cv.tex"
 PDF_NAME = "cv.pdf"
 LOG_NAME = "cv-compile.log"
+MISSING_GLYPH = "Missing character"  # the warning Tectonic prints for a character absent from the font
 
 
 def find_tectonic(settings: Settings) -> Path:
@@ -63,15 +64,25 @@ def compile_latex(source: str, out_dir: Path, tectonic: Path, timeout_seconds: f
         result = subprocess.run(
             [str(tectonic), "--untrusted", "--outdir", str(out_dir), str(tex_path)],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",  # compiler messages may hold any character: never fail while reading them
             timeout=timeout_seconds,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise CVCompilationError(f"Tectonic timed out after {timeout_seconds:.0f}s") from exc
 
+    # The compiler's output is kept on every run: it is the evidence that the PDF has no missing glyph.
+    (out_dir / LOG_NAME).write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     if result.returncode != 0 or not pdf_path.is_file():
-        (out_dir / LOG_NAME).write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
         logger.error("tectonic failed returncode=%s log=%s", result.returncode, out_dir / LOG_NAME)
         raise CVCompilationError(f"LaTeX compilation failed, see {out_dir / LOG_NAME}")
+    # A character the font does not contain is printed as a blank: the PDF would look right and read wrong. Refuse it.
+    missing = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines() if MISSING_GLYPH in line]
+    if missing:
+        logger.error("tectonic reported %d missing glyph(s) log=%s", len(missing), out_dir / LOG_NAME)
+        raise CVCompilationError(
+            f"the PDF would have {len(missing)} missing glyph(s), first: {missing[0]}. "
+            "Replace the character in the source text."
+        )
     return pdf_path

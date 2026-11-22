@@ -62,7 +62,7 @@ async def generate_tailored_cv_text(job_title: str, job_text: str, profile: dict
 
 async def generate_application_email(job_title: str, cv_summary: str, profile: dict, feedback: str = "(none)") -> dict:
     prompt = render(
-        "application_email.v1",
+        "application_email.v2",
         field=profile["field"],
         level=profile["level"],
         cv_summary=cv_summary,
