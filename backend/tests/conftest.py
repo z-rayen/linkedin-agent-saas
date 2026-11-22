@@ -61,6 +61,8 @@ os.environ["GROQ_RETRY_WAIT_SECONDS"] = "0"
 os.environ["CHECKPOINT_BACKEND"] = "memory"
 # No Tectonic binary is needed to run the suite. The startup check itself is tested directly.
 os.environ["TECTONIC_REQUIRED"] = "false"
+# The embedding model (hundreds of MB) is never downloaded by the suite: retrieval tests replace the embedder.
+os.environ["EMBEDDING_WARM_ON_STARTUP"] = "false"
 os.environ["SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ["LINKEDIN_CLIENT_ID"] = "test-linkedin-client"
 os.environ["LINKEDIN_CLIENT_SECRET"] = "test-fake-linkedin-client-secret"

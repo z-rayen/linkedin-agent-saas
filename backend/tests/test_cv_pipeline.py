@@ -2,13 +2,19 @@
 
 import asyncio
 import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from linkedin_agent.core.exceptions import CVCompilationError, LLMOutputError
+from linkedin_agent.core.exceptions import (
+    CV_STRUCTURE_MESSAGE,
+    CVCompilationError,
+    CVStructureError,
+    LLMOutputError,
+)
 from linkedin_agent.core.settings import Settings
 from linkedin_agent.cv import compile as compile_module
 from linkedin_agent.cv.compile import compile_latex, find_tectonic
@@ -58,6 +64,41 @@ def test_malformed_model_output_is_rejected_after_one_retry(monkeypatch: pytest.
     with pytest.raises(LLMOutputError):
         asyncio.run(tailor_cv("ML Intern", "job", load_master_cv(SAMPLE_MASTER)))
     assert len(fake.prompts) == 2
+
+
+def test_invalid_cv_structure_fails_with_a_user_message(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The reported failure: the model keeps answering with a section that does not exist (education)."""
+    bad = json.dumps({"lines": [{"section": "education", "text": "Diplome d'ingenieur", "source_ids": ["edu-1"]}]})
+    fake = _use_fake_llm(monkeypatch, bad)
+    with caplog.at_level(logging.WARNING, logger="linkedin_agent.infra.llm"), pytest.raises(CVStructureError) as info:
+        asyncio.run(tailor_cv("ML Intern", "job", load_master_cv(SAMPLE_MASTER)))
+
+    assert info.value.message == CV_STRUCTURE_MESSAGE
+    assert isinstance(info.value, LLMOutputError)  # callers that catch the generic type keep working
+    assert len(fake.prompts) == 2
+    assert "lines.0.section: literal_error" in caplog.text  # the log says which rule failed...
+    assert "Diplome" not in caplog.text  # ...and never what the model wrote
+
+
+def test_the_retry_with_the_problem_fed_back_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = [
+        json.dumps({"lines": [{"section": "experience", "text": "Built a FastAPI service", "source_ids": []}]}),
+        json.dumps({"lines": [{"section": "experience", "text": "Built a FastAPI service", "source_ids": ["exp-1"]}]}),
+    ]
+
+    class _Sequence(FakeLLM):
+        async def complete(self, prompt: str) -> str:
+            self.prompts.append(prompt)
+            return answers[len(self.prompts) - 1]
+
+    fake = _Sequence("")
+    monkeypatch.setattr(llm_module, "get_llm_client", lambda: fake)
+    result = asyncio.run(tailor_cv("ML Intern", "Python and FastAPI", load_master_cv(SAMPLE_MASTER)))
+
+    assert result.grounded
+    assert "lines.0.source_ids: too_short" in fake.prompts[1]
 
 
 def test_sample_master_cv_is_valid() -> None:

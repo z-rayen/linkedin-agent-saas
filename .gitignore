@@ -7,6 +7,8 @@
 **/data/private/
 # Private user data (real CVs, personal knowledge base, generated PDFs)
 data/private/
+# Downloaded model files (fastembed cache). A cache, not source: re-created on first start.
+**/data/models/
 *.pdf
 !docs/**/*.pdf
 !backend/tests/fixtures/**/*.pdf

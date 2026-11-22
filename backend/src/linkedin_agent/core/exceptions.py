@@ -59,6 +59,21 @@ class LLMOutputError(ExternalServiceError):
 
     code = "llm_invalid_output"
 
+    def __init__(self, message: str = "The model returned an invalid structure; retry or try another model") -> None:
+        super().__init__(message)
+
+
+CV_STRUCTURE_MESSAGE = "The model returned an invalid CV structure; retry or try another model"
+
+
+class CVStructureError(LLMOutputError):
+    """The model's tailored CV did not match the CV structure, even after one correction attempt. Shown to the user."""
+
+    code = "cv_invalid_structure"
+
+    def __init__(self) -> None:
+        super().__init__(CV_STRUCTURE_MESSAGE)
+
 
 class InvalidStateError(AppError):
     """The action is not allowed in the resource's current state (for example editing a sent application)."""

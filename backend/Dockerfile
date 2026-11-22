@@ -35,6 +35,8 @@ COPY --from=builder /app/.venv /app/.venv
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
+# The embedding model cache is written at runtime (FASTEMBED_CACHE_DIR, default data/models/fastembed).
+RUN mkdir -p /app/data/models && chown -R app:app /app/data
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -18,9 +18,10 @@ from fastapi.responses import JSONResponse
 
 from .core.exceptions import AppError
 from .core.logging import RequestIdMiddleware, setup_logging
-from .core.settings import get_settings, retired_variable_warnings
+from .core.settings import Settings, get_settings, retired_variable_warnings
 from .cv.compile import ensure_tectonic_at_startup
 from .infra.checkpoint import checkpointer_lifespan
+from .infra.embeddings import get_embedder
 from .routers import agent, applications, apply, auth, content, engage, oauth, profile, watch
 from .services import preparations
 
@@ -38,12 +39,27 @@ def warn_about_retired_variables() -> None:
         logger.warning(message)
 
 
+async def warm_embedding_model(current: Settings) -> None:
+    """Load the embedding model before the first request, in a worker thread (the download can take minutes).
+
+    A failure is logged, not fatal: the application works without retrieval, and the first request tries again.
+    """
+    if not current.embedding_warm_on_startup:
+        return
+    try:
+        await asyncio.to_thread(get_embedder().warm)
+        logger.info("embedding model ready")
+    except Exception as exc:
+        logger.error("embedding model not loaded at startup error_type=%s", type(exc).__name__)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Everything long-lived is set up here, once per process: the checkpoint pool, the startup checks, recovery."""
     current = get_settings()
     ensure_tectonic_at_startup(current)
     preparations.check_stall_threshold(current)
+    await warm_embedding_model(current)
     async with checkpointer_lifespan(current):
         # A restart must not leave a preparation stuck: stale runs are resumed from their checkpoint or failed.
         await preparations.recover_interrupted()

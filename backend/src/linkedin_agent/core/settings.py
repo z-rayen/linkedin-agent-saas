@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     checkpoint_pool_max_size: int = 4
     # Local embedding model (384 dimensions, FR/EN). Must match the Vector(384) column.
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # Where fastembed stores the model files, downloaded once. Relative paths resolve from the working directory,
+    # like private_data_dir. Not the OS temp directory, which the OS may clear.
+    fastembed_cache_dir: str = "data/models/fastembed"
+    # Load the embedding model at API startup, so the first request does not wait for the download.
+    embedding_warm_on_startup: bool = True
 
     # Default profile, used until the user saves their own.
     default_field: str = "Machine Learning, Data Science"

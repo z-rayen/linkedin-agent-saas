@@ -6,7 +6,7 @@ usage the provider reports. A 429 response is a safety net: its Retry-After head
 """
 
 import logging
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import Protocol, TypeVar
 
 import httpx
@@ -79,7 +79,11 @@ class GroqClient:
                 usage = data.get("usage") or {}
                 actual = usage.get("total_tokens")
                 self._budget.correct(reservation, int(actual) if isinstance(actual, int) else estimate)
-                content: str = data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    # Reasoning tokens count against max_tokens too: a cut answer is not valid JSON.
+                    logger.warning("llm answer cut at max_tokens=%d", s.llm_max_output_tokens)
+                content: str = choice["message"]["content"]
                 return content
 
             # Rejected: the request may or may not have been counted by the provider. Keep the estimate.
@@ -113,20 +117,76 @@ def _strip_code_fence(text: str) -> str:
     return text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
 
+MAX_PROBLEMS_REPORTED = 10
+UNKNOWN_FIELD = "<unknown>"
+
+
+@cache
+def _schema_field_names(model: type[BaseModel]) -> frozenset[str]:
+    """Every property name in the model's JSON schema. Used to keep model-supplied keys out of logs."""
+    names: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                names.update(properties)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(model.model_json_schema())
+    return frozenset(names)
+
+
+def describe_validation_errors(exc: ValidationError, model: type[BaseModel]) -> list[str]:
+    """Field path and error type of each problem, such as "lines.0.section: literal_error".
+
+    Never the input value or the message: those can contain the model's text or the candidate's CV. Path parts that
+    are not schema field names are replaced, so a key the model invented cannot reach the logs.
+    """
+    known = _schema_field_names(model)
+    described: list[str] = []
+    for error in exc.errors(include_url=False, include_context=False, include_input=False):
+        parts = [
+            str(part) if isinstance(part, int) else (part if part in known else UNKNOWN_FIELD) for part in error["loc"]
+        ]
+        path = ".".join(parts) or "(root)"
+        described.append(f"{path}: {error['type']}")
+    return described[:MAX_PROBLEMS_REPORTED]
+
+
+def correction_for(problems: list[str]) -> str:
+    """The retry instruction. It carries the problems (paths and types), never the rejected answer."""
+    listed = "\n".join(f"- {problem}" for problem in problems)
+    return (
+        "\n\nYour previous answer was rejected by the output validator. Problems (field path and error type only):\n"
+        f"{listed}\n"
+        "Return the complete answer again in the exact format the instructions require, fixing these problems. "
+        "Return only the JSON."
+    )
+
+
 async def complete_structured(prompt: str, model: type[ModelT], retries: int = 1) -> ModelT:
-    """Ask for JSON, validate it against `model`, retry the call up to `retries` times if it does not validate.
+    """Ask for JSON, validate it against `model`, and retry up to `retries` times if it does not validate.
+
+    Each retry sends the validation problems back to the model (field paths and error types, not content), so the
+    model can correct itself instead of repeating the same answer.
 
     Raises LLMUnavailableError if the provider fails, LLMOutputError if no attempt validates.
     """
     client = get_llm_client()
-    last_error: ValidationError | None = None
-    for _ in range(retries + 1):
-        text = await client.complete(prompt)
+    attempt_prompt = prompt
+    for attempt in range(1, retries + 2):
+        text = await client.complete(attempt_prompt)
         try:
             return model.model_validate_json(_strip_code_fence(text))
         except ValidationError as exc:
-            last_error = exc
-    logger.warning(
-        "llm output rejected model=%s errors=%d", model.__name__, last_error.error_count() if last_error else 0
-    )
-    raise LLMOutputError(f"LLM output did not match {model.__name__}")
+            problems = describe_validation_errors(exc, model)
+            logger.warning(
+                "llm output rejected model=%s attempt=%d problems=%s", model.__name__, attempt, "; ".join(problems)
+            )
+            attempt_prompt = prompt + correction_for(problems)
+    raise LLMOutputError()

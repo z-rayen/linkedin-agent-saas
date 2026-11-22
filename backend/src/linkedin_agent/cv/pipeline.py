@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.exceptions import ValidationFailedError
+from ..core.exceptions import CVStructureError, LLMOutputError, ValidationFailedError
 from ..infra.llm import complete_structured
 from ..prompts import render
 from .grounding import verify_grounding
@@ -26,13 +26,17 @@ class TailoringResult:
 async def tailor_cv(job_title: str, job_text: str, master: MasterCV, feedback: str = "(none)") -> TailoringResult:
     facts = "\n".join(f"[{fact.id}] ({fact.kind}) {fact.text}" for fact in master.facts)
     prompt = render(
-        "cv_tailor.v1",
+        "cv_tailor.v2",
         job_title=job_title,
         job_text=job_text[:JOB_TEXT_MAX_CHARS],
         facts=facts,
         feedback=feedback,
     )
-    cv = await complete_structured(prompt, TailoredCV, retries=1)
+    try:
+        cv = await complete_structured(prompt, TailoredCV, retries=1)
+    except LLMOutputError as exc:
+        # The user sees this message in the run status. The validation details are in the log, not here.
+        raise CVStructureError() from exc
     return TailoringResult(cv=cv, problems=verify_grounding(cv, master))
 
 
