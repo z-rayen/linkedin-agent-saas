@@ -18,7 +18,7 @@ from ..core.exceptions import (
     SendPolicyViolationError,
     ValidationFailedError,
 )
-from ..core.settings import get_settings
+from ..core.settings import Settings, get_settings
 from ..cv.build import build_cv_pdf
 from ..cv.email import with_signature
 from ..cv.grounding import GroundingProblem, verify_cv, verify_email
@@ -63,6 +63,25 @@ def save_master_cv(db: Session, user_id: int, master: MasterCV) -> None:
         db.add(row)
     row.master_cv_json = master.model_dump_json()
     db.commit()
+
+
+def stored_master_cv(db: Session, user_id: int) -> MasterCV | None:
+    """The user's own master CV, or None when none is saved yet."""
+    _, master_json = _profile_for(db, user_id)
+    return MasterCV.model_validate_json(master_json) if master_json else None
+
+
+MailMode = Literal["dry_run", "redirected", "real"]
+
+
+def mail_mode(settings: Settings) -> MailMode:
+    """How mail leaves this server, read from the configuration only: no address and no secret is involved.
+    Same rules as the send path: a dry run sends nothing; a redirect sends to the test address; otherwise real."""
+    if settings.mail_dry_run:
+        return "dry_run"
+    if settings.mail_redirect_to.strip():
+        return "redirected"
+    return "real"
 
 
 def _master_for(db: Session, user_id: int) -> MasterCV:

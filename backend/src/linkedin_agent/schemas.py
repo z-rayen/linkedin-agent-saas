@@ -1,11 +1,17 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalise_email(cls, value: object) -> object:
+        """Case and surrounding spaces do not make another address: " Bob@Example.com " is "bob@example.com"."""
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class UserOut(BaseModel):

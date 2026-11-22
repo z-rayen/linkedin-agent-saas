@@ -268,8 +268,8 @@ def test_applications_are_private_to_their_owner(
     _with_master(client, auth_headers)
     row = _prepare(client, auth_headers, "hr@acme.com")
 
-    client.post("/auth/register", json={"email": "dave@example.com", "password": "dave-pass-1"})
-    token = client.post("/auth/login", json={"email": "dave@example.com", "password": "dave-pass-1"}).json()[
+    client.post("/auth/register", json={"email": "dave@example.com", "password": "dave-pass-1234"})
+    token = client.post("/auth/login", json={"email": "dave@example.com", "password": "dave-pass-1234"}).json()[
         "access_token"
     ]
     dave = {"Authorization": f"Bearer {token}"}

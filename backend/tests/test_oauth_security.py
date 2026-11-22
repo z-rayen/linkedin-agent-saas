@@ -75,7 +75,7 @@ def test_state_with_a_forged_user_claim_is_rejected(client: TestClient, auth_hea
 
 
 def test_expired_state_is_rejected(client: TestClient) -> None:
-    client.post("/auth/register", json={"email": "exp@example.com", "password": "pw-123456"})
+    client.post("/auth/register", json={"email": "exp@example.com", "password": "pw-1234567890"})
     expired = _valid_claims(_user_id("exp@example.com"))
     expired["iat"] = utcnow() - timedelta(hours=1)
     expired["exp"] = utcnow() - timedelta(minutes=30)

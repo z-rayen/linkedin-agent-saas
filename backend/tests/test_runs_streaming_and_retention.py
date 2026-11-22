@@ -281,7 +281,7 @@ def test_deleting_the_account_removes_every_row_of_the_user_and_nothing_of_the_o
     assert response.status_code == 401
     assert _count(models.PreparationRun, alice) == 1  # a wrong password deletes nothing
 
-    response = client.request("DELETE", "/auth/account", json={"password": "s3cret-pass"}, headers=auth_headers)
+    response = client.request("DELETE", "/auth/account", json={"password": "s3cret-passphrase"}, headers=auth_headers)
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "deleted"
     for model in (models.PreparationRun, models.WatchResult, models.AgentMessage, models.Application):

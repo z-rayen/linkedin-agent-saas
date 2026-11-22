@@ -138,6 +138,34 @@ class InvalidOAuthStateError(AppError):
     code = "invalid_oauth_state"
 
 
+class PasswordTooShortError(AppError):
+    """The password is shorter than the registration policy. The details carry the limit, for the screen to show."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "password_too_short"
+
+    def __init__(self, min_length: int) -> None:
+        super().__init__(f"The password must be at least {min_length} characters long.", {"min_length": min_length})
+
+
+class PasswordTooLongError(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "password_too_long"
+
+    def __init__(self, max_bytes: int) -> None:
+        super().__init__(f"The password must be at most {max_bytes} bytes long (UTF-8).", {"max_bytes": max_bytes})
+
+
+class RateLimitedError(AppError):
+    """Too many failed logins for this account or this address. Nothing is checked until the window has passed."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__("Too many failed attempts. Try again later.", {"retry_after_seconds": retry_after_seconds})
+
+
 def http_error(error: AppError) -> HTTPException:
     """Convert to FastAPI's exception for routes that still raise HTTPException."""
     return HTTPException(status_code=error.status_code, detail=error.message)

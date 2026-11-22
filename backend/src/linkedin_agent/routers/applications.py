@@ -96,6 +96,37 @@ def put_master_cv(
     return {"status": "saved", "facts": len(master.facts)}
 
 
+@router.get(
+    "/master-cv",
+    response_model=MasterCV,
+    summary="The authenticated user's master CV",
+    responses={404: {"description": "No master CV saved yet"}},
+)
+def get_master_cv(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> MasterCV:
+    master = service.stored_master_cv(db, current_user.id)
+    if master is None:
+        raise http_error(NotFoundError("No master CV saved yet"))
+    return master
+
+
+class MailModeOut(BaseModel):
+    """How mail leaves the server. Read from the configuration: it never carries an address or a secret."""
+
+    mode: Literal["dry_run", "redirected", "real"]
+
+
+@router.get(
+    "/mail-mode",
+    response_model=MailModeOut,
+    summary="How mail is sent by this server: dry_run, redirected or real",
+)
+def get_mail_mode(_: models.User = Depends(get_current_user)) -> MailModeOut:
+    return MailModeOut(mode=service.mail_mode(get_settings()))
+
+
 @router.post(
     "",
     status_code=202,
@@ -195,7 +226,16 @@ def get_application(
     return _out(_owned(db, current_user, application_id))
 
 
-@router.get("/{application_id}/cv.pdf")
+@router.get(
+    "/{application_id}/cv.pdf",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "The frozen CV as a PDF",
+            "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+        },
+    },
+)
 def preview_pdf(
     application_id: int,
     db: Session = Depends(get_db),

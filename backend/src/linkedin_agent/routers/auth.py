@@ -1,17 +1,38 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import auth_utils, models, schemas
 from ..auth_utils import get_current_user
+from ..core.exceptions import PasswordTooLongError, PasswordTooShortError
+from ..core.settings import get_settings
 from ..database import get_db
 from ..services import retention
+from ..services.login_guard import LOGIN_GUARD
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+UNKNOWN_ADDRESS = "unknown"
+
+
+def _check_password_policy(password: str) -> None:
+    """At least the configured length, and within bcrypt's limit in bytes (not characters)."""
+    if len(password) < get_settings().password_min_length:
+        raise PasswordTooShortError(get_settings().password_min_length)
+    if len(password.encode("utf-8")) > auth_utils.BCRYPT_MAX_BYTES:
+        raise PasswordTooLongError(auth_utils.BCRYPT_MAX_BYTES)
+
+
+@router.get(
+    "/password-policy",
+    summary="The password rules of registration, for the registration screen (public)",
+)
+def password_policy() -> dict[str, int]:
+    return {"min_length": get_settings().password_min_length, "max_bytes": auth_utils.BCRYPT_MAX_BYTES}
 
 
 @router.post("/register", response_model=schemas.UserOut)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    _check_password_policy(user.password)
     existing = db.query(models.User).filter(models.User.email == user.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -24,11 +45,16 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=schemas.Token)
-def login(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def login(user: schemas.UserCreate, request: Request, db: Session = Depends(get_db)):
+    # The email is already normalised by the schema, so the account key is the same for every spelling of it.
+    address = request.client.host if request.client else UNKNOWN_ADDRESS
+    LOGIN_GUARD.check(user.email, address)
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if not db_user or not auth_utils.verify_password(user.password, db_user.hashed_password):
+        LOGIN_GUARD.record_failure(user.email, address)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    LOGIN_GUARD.record_success(user.email)
     token = auth_utils.create_access_token({"sub": str(db_user.id)})
     return {"access_token": token}
 

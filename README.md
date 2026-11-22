@@ -388,6 +388,112 @@ synchronous `POST /watch/run` keeps its behaviour and its contract.
 
 Outside Docker, install Tectonic yourself and point `TECTONIC_PATH` at it (or put it on `PATH`).
 
+## Frontend (React)
+
+The React frontend lives in `frontend/`: Vite, React, TypeScript (strict), React Router and TanStack Query. It is being
+built in slices. Slice 1 covers login and registration, the master CV, new applications with live progress, the review
+screen, approval and sending, and the applications list. The previous plain-HTML app is kept in `frontend/legacy/` until
+the React screens reach parity. Node 26 is the tested version.
+
+### Run it in development
+
+Three terminals, from the repository root (Windows PowerShell):
+
+```powershell
+# 1. Database
+docker compose up -d db
+
+# 2. Backend (from backend/, with backend/.env filled in)
+.\.venv\Scripts\python.exe -m uvicorn linkedin_agent.main:app --reload --app-dir src
+
+# 3. Frontend (from frontend/). First time only: copy the example file and install the dependencies.
+Copy-Item .env.example .env
+npm ci
+npm run dev
+```
+
+Open the address printed by Vite, `http://localhost:5173` by default.
+
+Frontend variables (`frontend/.env.example`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | `/api` | Path the browser calls. It is always same-origin. |
+| `VITE_DEV_PORT` | `5173` | Port of the Vite dev server. |
+| `VITE_DEV_API_TARGET` | `http://127.0.0.1:8000` | Where the dev proxy forwards `/api/...` (the `/api` prefix is removed). |
+
+Because of the proxy, the browser never calls the API on another port, so CORS does not apply in development.
+`FRONTEND_ORIGIN` in `backend/.env` must be the origin the browser uses: `http://localhost:5173` in development (follow
+`VITE_DEV_PORT` if you change it), `http://localhost:8080` with Docker.
+
+Scripts (run from `frontend/`):
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Dev server with hot reload. |
+| `npm run build` | Type check, then production build into `dist/`. |
+| `npm run preview` | Serves the production build locally. |
+| `npm run lint` | ESLint (strict type-aware rules, React hooks). |
+| `npm run format:check` | Prettier check (`npm run format` to fix). |
+| `npm run typecheck` | TypeScript, no emit. |
+| `npm test` | Vitest with Testing Library (review rules, API client, auth redirect, OpenAPI contract). |
+
+The API client is checked against the backend's OpenAPI snapshot, `frontend/openapi.json`. To refresh the snapshot after a
+backend change:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe scripts/dump_openapi.py > ../frontend/openapi.json
+cd ../frontend
+npm test
+```
+
+### Run it with Docker
+
+`docker compose up -d --build` starts the database, the API and the web app. The web app is served by nginx on
+`http://localhost:8080` (change the host port with `FRONTEND_PORT`). nginx serves the single-page app and forwards `/api/`
+to the API, so the browser sees one origin and no CORS is needed.
+
+### Authentication
+
+- The login token comes from `POST /auth/login`. It is kept in memory and mirrored in `sessionStorage` (key
+  `linkedin-agent.session.v1`), so a reload keeps the session and closing the tab ends it.
+- The token never goes in a URL, never in `localStorage`, and is never logged. The PDF preview is fetched with the
+  token in the `Authorization` header and shown through a temporary blob URL.
+- A `401` from the API ends the session and sends the user to the login page with a message. A token that has
+  already expired is detected in the browser (its payload is read, not verified); the server stays the judge.
+- **Trade-off, decided for slice 1:** any script running on the app's origin can read `sessionStorage`, so an XSS bug
+  would expose the token. An `httpOnly` cookie avoids that, but needs backend changes (see below). The storage is in
+  one module, `frontend/src/auth/tokenStorage.ts`, so switching later does not touch the screens.
+
+### Backend changes needed
+
+Done in the backend, and used by the frontend:
+
+- **`GET /applications/mail-mode`** returns `{"mode": "dry_run" | "redirected" | "real"}`, computed from the
+  configuration only: no address, no secret. The send panel shows that mode, and sending stays disabled while it is
+  unknown.
+- **`GET /applications/master-cv`** returns the caller's own master CV (404 when none is saved).
+- **Password policy.** `GET /auth/password-policy` publishes the limits. Registration refuses a password shorter than
+  `PASSWORD_MIN_LENGTH` (default 12, 422 with `code: password_too_short`) or longer than bcrypt's 72 bytes (422 with
+  `code: password_too_long`).
+- **Email normalisation.** Case and surrounding spaces are removed on registration and login. Accounts created before
+  this change with mixed-case addresses no longer match: normalise `users.email` in a data migration before deploying.
+- **Failed-login limit.** After `LOGIN_MAX_FAILURES` (default 5) failed logins within `LOGIN_WINDOW_SECONDS` (default
+  900), for one account or from one client address, logins are refused with 429 (`code: rate_limited`). The state is in
+  memory, per process: with several API workers the effective limit multiplies. Behind a reverse proxy every client
+  shares the proxy's address until forwarded headers are trusted, which is not done yet.
+- **`cv.pdf`** is declared as `application/pdf` in the OpenAPI.
+- **Progress streams** are opened by the frontend with a single-use ticket (`POST /runs/{id}/stream-ticket`, then
+  `GET /runs/{id}/events?ticket=`), with reconnection (`frontend/src/api/runStream.ts`).
+
+Still not done:
+
+1. **CORS and production origin.** Not needed while the browser uses the nginx proxy or the Vite proxy. It is needed
+   only if the frontend is served from another origin; then `FRONTEND_ORIGIN` must list that origin.
+2. **Optional: `httpOnly` cookie authentication** (login sets the cookie, CSRF protection on unsafe methods, a logout
+   endpoint). This removes the token from the browser's JavaScript. It is a trade-off to decide in an ADR.
+
 ## Retired variables
 
 `FRONTEND_URL` and `CORS_ORIGINS` were replaced by `FRONTEND_ORIGIN`, a single origin without a path. Settings ignores

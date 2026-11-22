@@ -159,6 +159,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     # bcrypt cost factor. 12 is the production default; tests lower it, because hashing is intentionally slow.
     bcrypt_rounds: int = 12
+    # Registration policy: a minimum length (NIST-style: length over composition). The maximum is bcrypt's byte limit.
+    password_min_length: int = Field(default=12, ge=8, le=128)
+    # Failed logins allowed per account and per client address within the window, then refused until it passes.
+    login_max_failures: int = Field(default=5, ge=1)
+    login_window_seconds: float = Field(default=900.0, gt=0)
     access_token_expire_minutes: int = 60 * 24 * 7
     oauth_state_expire_minutes: int = 10
 

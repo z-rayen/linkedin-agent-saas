@@ -201,6 +201,16 @@ def _blocked(request: httpx.Request) -> httpx.Response:
 
 
 @pytest.fixture(autouse=True)
+def fresh_login_guard() -> Iterator[None]:
+    """Failed logins are counted per process: every test starts with none, so one test cannot lock out another."""
+    from linkedin_agent.services.login_guard import LOGIN_GUARD
+
+    LOGIN_GUARD.reset()
+    yield
+    LOGIN_GUARD.reset()
+
+
+@pytest.fixture(autouse=True)
 def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs with the network disabled, for httpx and for raw sockets (smtplib, Tectonic's helpers).
 
@@ -244,8 +254,8 @@ def mock_http(monkeypatch: pytest.MonkeyPatch) -> Callable[[Callable[[httpx.Requ
 @pytest.fixture
 def auth_headers(client) -> dict[str, str]:  # type: ignore[no-untyped-def]
     """Register and log in a test user, return the bearer header."""
-    client.post("/auth/register", json={"email": "alice@example.com", "password": "s3cret-pass"})
-    token = client.post("/auth/login", json={"email": "alice@example.com", "password": "s3cret-pass"}).json()[
+    client.post("/auth/register", json={"email": "alice@example.com", "password": "s3cret-passphrase"})
+    token = client.post("/auth/login", json={"email": "alice@example.com", "password": "s3cret-passphrase"}).json()[
         "access_token"
     ]
     return {"Authorization": f"Bearer {token}"}

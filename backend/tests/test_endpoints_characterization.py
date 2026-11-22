@@ -61,7 +61,7 @@ def fake_search(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_register_returns_user_without_password(client: TestClient) -> None:
-    r = client.post("/auth/register", json={"email": "bob@example.com", "password": "pw-12345"})
+    r = client.post("/auth/register", json={"email": "bob@example.com", "password": "pw-1234567890"})
     assert r.status_code == 200
     body = r.json()
     assert body["email"] == "bob@example.com"
@@ -70,7 +70,7 @@ def test_register_returns_user_without_password(client: TestClient) -> None:
 
 
 def test_register_duplicate_email_is_rejected(client: TestClient) -> None:
-    payload = {"email": "bob@example.com", "password": "pw-12345"}
+    payload = {"email": "bob@example.com", "password": "pw-1234567890"}
     client.post("/auth/register", json=payload)
     r = client.post("/auth/register", json=payload)
     assert r.status_code == 400
@@ -78,14 +78,14 @@ def test_register_duplicate_email_is_rejected(client: TestClient) -> None:
 
 
 def test_login_returns_bearer_token(client: TestClient) -> None:
-    client.post("/auth/register", json={"email": "bob@example.com", "password": "pw-12345"})
-    r = client.post("/auth/login", json={"email": "bob@example.com", "password": "pw-12345"})
+    client.post("/auth/register", json={"email": "bob@example.com", "password": "pw-1234567890"})
+    r = client.post("/auth/login", json={"email": "bob@example.com", "password": "pw-1234567890"})
     assert r.status_code == 200
     assert r.json()["access_token"]
 
 
 def test_login_wrong_password_is_401(client: TestClient) -> None:
-    client.post("/auth/register", json={"email": "bob@example.com", "password": "pw-12345"})
+    client.post("/auth/register", json={"email": "bob@example.com", "password": "pw-1234567890"})
     r = client.post("/auth/login", json={"email": "bob@example.com", "password": "nope"})
     assert r.status_code == 401
 
@@ -142,8 +142,8 @@ def test_knowledge_rejects_blank_content(client: TestClient, auth_headers: dict)
 def test_knowledge_is_isolated_between_users(client: TestClient, auth_headers: dict) -> None:
     item_id = client.post("/profile/knowledge", json={"content": "secret project"}, headers=auth_headers).json()["id"]
 
-    client.post("/auth/register", json={"email": "eve@example.com", "password": "eve-pass-1"})
-    token = client.post("/auth/login", json={"email": "eve@example.com", "password": "eve-pass-1"}).json()[
+    client.post("/auth/register", json={"email": "eve@example.com", "password": "eve-pass-1234"})
+    token = client.post("/auth/login", json={"email": "eve@example.com", "password": "eve-pass-1234"}).json()[
         "access_token"
     ]
     other = {"Authorization": f"Bearer {token}"}

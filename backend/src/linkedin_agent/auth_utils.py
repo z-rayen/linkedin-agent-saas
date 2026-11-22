@@ -15,6 +15,8 @@ from .database import get_db
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=get_settings().bcrypt_rounds)
 OAUTH_STATE_PURPOSE = "oauth_state"
+# bcrypt reads at most 72 bytes of a password. Longer passwords are refused rather than silently cut.
+BCRYPT_MAX_BYTES = 72
 
 
 def hash_password(password: str) -> str:
