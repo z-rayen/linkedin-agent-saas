@@ -223,6 +223,16 @@ convention will not match, and that is deliberate.
   dropped: their date cannot be checked against the sources. The answer says how many were removed, and that this does
   not mean nothing was found. If every statement is removed, the answer says that no statement could be checked, and
   that this does not mean nothing was found either. The counts are in `unsupported.relative_time`.
+- **Entities.** Every capitalised term of a statement (a company, a job title, an acronym) must appear, accent- and
+  case-insensitively, in the text of a source the statement cites: its title, its snippet or its fetched body. A term
+  found only in a snippet labels the statement. A table cell naming a term that no cited source contains gets the
+  "not specified" wording, and its citation is kept; a prose sentence with such a term is removed. Both are counted in
+  `unsupported.entities_not_found`. Limits: sentence openers and common words are listed (`ENTITY_COMMON` in
+  `graphs/research_checks.py`), so an unlisted opener is checked like a name; a name written differently in the source
+  (an abbreviation, another script) is removed. The grounding reuses the CV check's capitalised-term rule.
+- **Citation-only lines** ("- [1]") assert nothing: they are dropped from the answer and from `claims`.
+- **Counts from several pages.** When figures come from two or more search pages, the answer says, in its language,
+  that such counts are not comparable and must not be added up. This is a deliberate, conservative caution.
 - **Labels and tables.** The snippet label is added by code only, from the basis: a label the model writes is removed
   first, so a full-page statement never carries one. In a table, the label and the citations stay inside the cells: a
   citation written after the last column moves into the last cell, a short row is padded, and every row keeps the
@@ -246,7 +256,8 @@ Each run returns the answer and its traceability, in the result:
   full page;
 - `also_found`: the other retrieved sources, which no statement rests on. It is kept visible on purpose;
 - `unsupported`: counts of the statements dropped, by reason: `uncited`, `relative_time`, `numbers_not_found` (a cited
-  full page lacks the figure) and `numbers_snippet_only` (the cited sources are snippets, and the figure is not in
+  full page lacks the figure), `entities_not_found` (a name or title that no cited source contains), and
+  `numbers_snippet_only` (the cited sources are snippets, and the figure is not in
   them), plus `off_topic` (search results dropped by the relevance filter)
   (search results dropped by the relevance filter).
 

@@ -81,7 +81,7 @@ class Scripted:
         self.results = results or {}
         self.pages = pages or {}
         self.reflections = list(reflections or [Reflection(sufficient=True, queries=[])])
-        self.answers = list(answers or ["Fact one [1]. Fact two [2]."])
+        self.answers = list(answers or ["the first fact [1]. the second fact [2]."])
         self.post = post
         self.limits = limits
         self.searched: list[str] = []
@@ -175,7 +175,9 @@ def test_happy_path_answers_with_the_retrieved_sources_only() -> None:
     assert state["answer_ok"] is True
     # Source 1 was read in full; source 2 is a snippet, so its statement is labelled rather than presented as verified.
     assert [claim["basis"] for claim in state["claims"]] == ["fetched", "snippet"]
-    assert state["answer"].startswith("Fact one [1]. Fact two [2]. (according to the search result snippet)")
+    assert state["answer"].startswith(
+        "the first fact [1]. the second fact [2]. (according to the search result snippet)"
+    )
     assert scripted.read_urls == ["https://a.example/1", "https://b.example/2"]
     assert scripted.synth_calls == 1
     assert scripted.saved == []  # no post was asked for
@@ -184,12 +186,12 @@ def test_happy_path_answers_with_the_retrieved_sources_only() -> None:
 def test_an_invalid_citation_is_removed_and_counted_never_kept() -> None:
     scripted = Scripted(
         results={"q1": [_hit("Paper A", "https://a.example/1")]},
-        answers=["Solid claim [1]. Invented claim [9]. Zero [0] too."],
+        answers=["solid claim [1]. invented claim [9]. zero [0] too."],
     )
     state = _run(scripted)
 
     # The invalid markers are removed; the sentences that lost their only citation are dropped as uncited.
-    assert state["answer"].startswith("Solid claim [1].")
+    assert state["answer"].startswith("solid claim [1].")
     assert "Invented" not in state["answer"] and "Zero" not in state["answer"]
     assert state["citations"] == [1]
     assert state["removed_citations"] == 2
@@ -227,7 +229,7 @@ def test_one_reflection_loop_improves_the_evidence() -> None:
             Reflection(sufficient=False, queries=["q2"]),
             Reflection(sufficient=True, queries=[]),
         ],
-        answers=["Only the better source supports this [1]."],
+        answers=["only the better source supports this [1]."],
     )
     state = _run(scripted)
 

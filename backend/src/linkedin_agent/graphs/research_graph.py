@@ -348,6 +348,7 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
             "relative_time": checked.dropped_relative_time,
             "numbers_not_found": checked.dropped_numbers_not_found,
             "numbers_snippet_only": checked.dropped_numbers_snippet_only,
+            "entities_not_found": checked.dropped_entities,
         }
         logger.info(
             "research checks statements=%d dropped=%d labelled=%d cells_filled=%d",
@@ -362,6 +363,8 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         parts = [checked.text if answer_ok else language.nothing_checked]
         if checked.dropped_relative_time:
             parts.append(language.relative_time_removed.format(count=checked.dropped_relative_time))
+        if checked.count_caution:
+            parts.append(language.count_caution)
         parts.append(language.retrieval_line.format(date=state["retrieved_at"]))
         return {
             "shown": shown,

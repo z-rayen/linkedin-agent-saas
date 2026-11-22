@@ -111,12 +111,15 @@ def test_the_answer_keeps_only_what_the_sources_support(world: FakeModel) -> Non
     assert "last 1-2 weeks" not in answer  # a relative time has no date to check against
     assert "Other claim" not in answer  # its only citation named no shown source
     assert "| Company | Role | Date |" in answer  # the table structure is kept
-    assert "| not specified in the sources | ML intern | 2026-11-10 [1] |" in answer  # the omitted field
+    assert (
+        "| not specified in the sources | not specified in the sources | 2026-11-10 [1] |" in answer
+    )  # the omitted field
     assert result["unsupported"] == {
         "uncited": 1,
         "relative_time": 1,
         "numbers_not_found": 1,
         "numbers_snippet_only": 0,
+        "entities_not_found": 1,
     }
     assert result["removed_citations"] == 1
 
@@ -133,7 +136,7 @@ def test_the_output_traces_each_statement_to_its_sources_and_their_basis(world: 
 
     assert result["claims"] == [
         {
-            "text": "| not specified in the sources | ML intern | 2026-11-10 [1] |",
+            "text": "| not specified in the sources | not specified in the sources | 2026-11-10 [1] |",
             "sources": [1],
             "basis": "fetched",
         }

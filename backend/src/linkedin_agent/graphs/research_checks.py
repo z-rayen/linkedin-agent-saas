@@ -31,6 +31,8 @@ from functools import cache
 from urllib.parse import urlsplit
 
 from ..core.settings import ResearchLanguage
+from ..cv.grounding import capitalised_terms, contains_term
+from ..cv.lexicon import NON_CLAIM_FOLDED, fold
 
 CITATION_MARKER = re.compile(r"\[(\d{1,3})\]")
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
@@ -87,9 +89,11 @@ class AnswerCheck:
     dropped_relative_time: int
     dropped_numbers_not_found: int  # cited full page(s) do not contain the number
     dropped_numbers_snippet_only: int  # only snippets are cited, and the number is not in them
+    dropped_entities: int  # names or titles that no cited source contains
     labelled: int
     cells_filled: int
     labels_removed: int  # snippet labels written by the model and removed by the check
+    count_caution: bool  # figures come from two or more search pages: the caution must be shown
 
     @property
     def dropped_numbers(self) -> int:
@@ -166,30 +170,6 @@ def check_citations(answer: str, source_count: int) -> CitationCheck:
     return CitationCheck(text=text.strip(), cited=cited, removed=removed)
 
 
-def number_basis(text: str, cited: list[int], evidence: list[Evidence], language: ResearchLanguage) -> str | None:
-    """Where the numbers of a statement are found: in a full page (FETCHED), only in snippets (SNIPPET), or nowhere.
-
-    None when the statement has no number. A number found in a snippet only is SNIPPET even when another cited source
-    was read in full: the figure itself is what must be verified.
-    """
-    needed = numbers_in(text, language)
-    if not needed:
-        return None
-    in_pages: set[str] = set()
-    in_any: set[str] = set()
-    for number in cited:
-        source = evidence[number - 1]
-        found = numbers_in(source.text, language)
-        in_any |= found
-        if source.fetched:
-            in_pages |= found
-    if needed <= in_pages:
-        return FETCHED
-    if needed <= in_any:
-        return SNIPPET
-    return UNSUPPORTED
-
-
 def is_separator_row(row: str) -> bool:
     return "-" in row and re.fullmatch(r"\s*\|?[\s:|-]+\|?\s*", row) is not None
 
@@ -229,15 +209,137 @@ def with_label_in_last_cell(row: str, label: str) -> str:
     return join_cells(cells)
 
 
-def _fallback_basis(cited: list[int], evidence: list[Evidence]) -> str:
-    return FETCHED if any(evidence[number - 1].fetched for number in cited) else SNIPPET
-
-
 def _label_pattern(labels: tuple[str, ...]) -> re.Pattern[str] | None:
     present = sorted({label for label in labels if label}, key=len, reverse=True)
     if not present:
         return None
     return re.compile("|".join(re.escape(label) for label in present), re.IGNORECASE)
+
+
+# --- entities: proper nouns, company names and job titles must appear in the cited sources ------------------------
+
+# Capitalised words that are not entities: sentence openers, articles, and words that appear in every result page.
+ENTITY_COMMON: frozenset[str] = frozenset(
+    fold(word)
+    for word in (
+        "A", "À", "Au", "De", "Des", "Du", "Et", "Ou", "En", "Il", "Elle", "Ils", "Ce", "Cette", "Ces", "Les", "Le",
+        "La", "L", "D", "Un", "Une", "Pour", "Dans", "Avec", "Sans", "Sur", "Selon", "Plus", "Moins", "Non", "Oui",
+        "The", "This", "These", "There", "And", "Or", "Of", "In", "On", "For", "With", "Not", "According", "Sources",
+        "Source", "Results", "Result", "Search", "Snippet", "Full", "Page", "Note", "Caution", "Remarque", "Attention",
+        "Offres", "Offre", "Jobs", "Job", "Emplois", "Count", "Location", "Title",
+        # Sentence openers, English and French: they start sentences, they are not names.
+        "It", "Its", "He", "She", "We", "They", "Their", "Our", "You", "Your", "I", "My", "His", "Her", "Them",
+        "Based", "Here", "Overall", "Recent", "Recently", "Several", "Many", "Some", "Each", "Both", "Also", "Then",
+        "After", "Before", "Because", "However", "Although", "Yes", "No", "Other", "Others", "Most", "Many", "Nearly",
+        "Voici", "Ici", "Aucun", "Aucune", "Certaines", "Certains", "Plusieurs", "Beaucoup", "Chaque", "Également",
+        "Ensuite", "Enfin", "Cependant", "Puis", "Donc", "Alors", "Mais", "Quels", "Quelles", "Quel", "Quelle", "Où",
+        "Environ", "Parmi", "Depuis", "Lors", "Ainsi", "Aussi",
+    )
+)  # fmt: skip
+
+# A line that holds only citations ("- [1]") asserts nothing: it is dropped.
+CITATION_FRAGMENT = re.compile(r"\s*(?:[-*•]|\d+[.)])?\s*(?:\[\d{1,3}\]\s*)+")
+MISSING_ENTITY = "missing_entity"
+OK = "ok"
+
+
+def entities_in(statement: str) -> list[str]:
+    """The distinct capitalised terms of a statement that must be found in its cited sources, as written."""
+    seen: dict[str, str] = {}
+    for term in capitalised_terms(CITATION_MARKER.sub(" ", statement)):
+        key = fold(term)
+        if not key or key in ENTITY_COMMON or key in NON_CLAIM_FOLDED or term.isdigit():
+            continue
+        seen.setdefault(key, term)
+    return list(seen.values())
+
+
+@dataclass(frozen=True)
+class Support:
+    """What the cited sources of one statement contain, folded for comparison."""
+
+    fetched_text: str
+    any_text: str
+    fetched_numbers: frozenset[str]
+    any_numbers: frozenset[str]
+    any_fetched: bool
+
+
+def support_of(cited: list[int], evidence: list[Evidence], language: ResearchLanguage) -> Support:
+    fetched = [evidence[number - 1] for number in cited if evidence[number - 1].fetched]
+    everything = [evidence[number - 1] for number in cited]
+    return Support(
+        fetched_text=fold(" ".join(source.text for source in fetched)),
+        any_text=fold(" ".join(source.text for source in everything)),
+        fetched_numbers=frozenset(n for source in fetched for n in numbers_in(source.text, language)),
+        any_numbers=frozenset(n for source in everything for n in numbers_in(source.text, language)),
+        any_fetched=bool(fetched),
+    )
+
+
+@dataclass(frozen=True)
+class Assessment:
+    status: str  # OK, UNSUPPORTED (a figure is missing) or MISSING_ENTITY (a name or a title is missing)
+    basis: str  # recomputed for the statement as it now reads: FETCHED, or SNIPPET when a token rests on a snippet
+    missing_entities: tuple[str, ...]
+
+
+def assess(statement: str, support: Support, language: ResearchLanguage) -> Assessment:
+    """Whether every figure and every name of a statement is in its cited sources, and where each one is found."""
+    numbers = numbers_in(statement, language)
+    entities = entities_in(statement)
+    if numbers - support.any_numbers:
+        return Assessment(UNSUPPORTED, "", ())
+    missing = tuple(term for term in entities if not contains_term(support.any_text, term))
+    if missing:
+        return Assessment(MISSING_ENTITY, "", missing)
+    if not numbers and not entities:
+        return Assessment(OK, FETCHED if support.any_fetched else SNIPPET, ())
+    snippet_only = any(n not in support.fetched_numbers for n in numbers) or any(
+        not contains_term(support.fetched_text, term) for term in entities
+    )
+    return Assessment(OK, SNIPPET if snippet_only else FETCHED, ())
+
+
+def _count_dropped_figure(support: Support, counts: dict[str, int]) -> None:
+    counts["not_found" if support.any_fetched else "snippet_only"] += 1
+
+
+def _cell_citations(cell: str) -> str:
+    return " ".join(match.group(0) for match in CITATION_MARKER.finditer(cell))
+
+
+def _judge_row(
+    row: str,
+    cited: list[int],
+    evidence: list[Evidence],
+    language: ResearchLanguage,
+    counts: dict[str, int],
+) -> tuple[str, str] | None:
+    """The row after its checks and its basis recomputed on the final row, or None when the whole row is removed.
+
+    A cell that names a term no cited source contains gets the "not specified" wording, its citation kept. The row is
+    then judged again as it now reads.
+    """
+    verdict = assess(row, support_of(cited, evidence, language), language)
+    if verdict.status == UNSUPPORTED:
+        _count_dropped_figure(support_of(cited, evidence, language), counts)
+        return None
+    if verdict.status == MISSING_ENTITY:
+        cells = split_cells(row)
+        for index, cell in enumerate(cells):
+            hit = [term for term in verdict.missing_entities if contains_term(cell, term)]
+            if hit:
+                cells[index] = f"{language.not_specified} {_cell_citations(cell)}".strip()
+                counts["entities"] += 1  # one removed cell
+        row = join_cells(cells)
+        cited = citations_in(row, len(evidence))
+        verdict = assess(row, support_of(cited, evidence, language), language)
+        if verdict.status != OK:
+            return None
+    if not cited and (numbers_in(row, language) or entities_in(row)):
+        return None  # a figure or a name with no source: the row is not kept
+    return row, verdict.basis
 
 
 def check_answer(
@@ -248,30 +350,20 @@ def check_answer(
     require_citations: bool,
     known_labels: tuple[str, ...] = (),
 ) -> AnswerCheck:
-    """The answer, line by line, with every failing statement removed or labelled. Counts say what was done.
+    """The answer, line by line, with every failing statement removed, corrected or labelled. Counts say what was done.
 
     `known_labels` are the snippet labels of every language: any of them written by the model is removed, and the
-    label of the statement's basis is added by this function only.
+    label of a statement's basis is added by this function only, from the basis recomputed on the final statement.
     """
     label_pattern = _label_pattern((*known_labels, language.snippet_label))
     lines_out: list[str] = []
     claims: list[Claim] = []
-    dropped_uncited = dropped_relative = not_found = snippet_only = labelled = cells_filled = labels_removed = 0
-    width: int | None = None  # the cell count of the table being read: its first row sets it
+    counts = {"uncited": 0, "relative": 0, "not_found": 0, "snippet_only": 0, "entities": 0}
+    labelled = cells_filled = labels_removed = 0
+    width: int | None = None  # the cell count of the table being read; its first row is the header
 
-    def judge(statement: str, cited: list[int]) -> tuple[str, str] | None:
-        """(basis, statement) for a statement with citations, or None when a number has no source (counted)."""
-        nonlocal not_found, snippet_only
-        verdict = number_basis(statement, cited, evidence, language)
-        if verdict == UNSUPPORTED:
-            if any(evidence[number - 1].fetched for number in cited):
-                not_found += 1
-            else:
-                snippet_only += 1
-            return None
-        return (verdict or _fallback_basis(cited, evidence)), statement
-
-    for raw_line in text.split("\n"):
+    all_lines = text.split("\n")
+    for position, raw_line in enumerate(all_lines):
         line = raw_line
         if label_pattern is not None:
             line, removed_here = label_pattern.subn("", line)
@@ -283,34 +375,42 @@ def check_answer(
             lines_out.append(line)  # blank lines and headings are structure
             width = None
             continue
+        if CITATION_FRAGMENT.fullmatch(stripped):
+            continue  # a line that is only citations asserts nothing
         if stripped.startswith("|"):
             if is_separator_row(stripped):
                 lines_out.append(stripped)
                 continue
-            if width is None:
-                width = len(split_cells(stripped))
-            row, filled = normalize_row(stripped, width, language.not_specified)
+            # A header is a row followed by the separator line. Without one, the first row still sets the width.
+            followed_by_separator = position + 1 < len(all_lines) and is_separator_row(all_lines[position + 1].strip())
+            is_header = width is None and followed_by_separator
+            table_width = len(split_cells(stripped)) if width is None else width
+            width = table_width
+            row, filled = normalize_row(stripped, table_width, language.not_specified)
             cells_filled += filled
             if has_relative_time(row):
-                dropped_relative += 1
+                counts["relative"] += 1
+                continue
+            if is_header:
+                lines_out.append(row)  # the header names the columns: structure, not a statement
                 continue
             cited = citations_in(row, len(evidence))
+            if not cited and numbers_in(row, language):
+                counts["uncited"] += 1
+                continue
+            outcome = _judge_row(row, cited, evidence, language, counts)
+            if outcome is None:
+                continue
+            row, basis = outcome
+            cited = citations_in(row, len(evidence))
             if not cited:
-                # A row that cites nothing is structure (a header): it is kept, but it must not carry a number.
-                if numbers_in(row, language):
-                    dropped_uncited += 1
-                    continue
-                lines_out.append(row)
+                lines_out.append(row)  # a body row with no citation and no figure or name: kept as structure
                 continue
-            judged = judge(row, cited)
-            if judged is None:
-                continue
-            basis, shown = judged
             if basis == SNIPPET:
-                shown = with_label_in_last_cell(shown, language.snippet_label)
+                row = with_label_in_last_cell(row, language.snippet_label)
                 labelled += 1
-            claims.append(Claim(shown, tuple(cited), basis))
-            lines_out.append(shown)
+            claims.append(Claim(row, tuple(cited), basis))
+            lines_out.append(row)
             continue
 
         width = None  # a line that is not a table row ends the table
@@ -322,44 +422,52 @@ def check_answer(
             if not sentence:
                 continue
             if has_relative_time(sentence):
-                dropped_relative += 1
+                counts["relative"] += 1
                 continue
             cited = citations_in(sentence, len(evidence))
             if not cited:
                 if language.not_specified.lower() in sentence.lower():
                     kept.append(sentence)  # an honest "not specified" is kept as it is
                     claims.append(Claim(sentence, (), NONE))
-                elif numbers_in(sentence, language):
-                    dropped_uncited += 1  # a number with no source is never kept
-                elif require_citations:
-                    dropped_uncited += 1
+                elif require_citations or numbers_in(sentence, language) or entities_in(sentence):
+                    # Without a citation, a figure or a name has no source: the sentence is not kept.
+                    counts["uncited"] += 1
                 else:
                     kept.append(sentence)
                     claims.append(Claim(sentence, (), NONE))
                 continue
-            judged = judge(sentence, cited)
-            if judged is None:
+            support = support_of(cited, evidence, language)
+            verdict = assess(sentence, support, language)
+            if verdict.status == UNSUPPORTED:
+                _count_dropped_figure(support, counts)
                 continue
-            basis, shown = judged
-            if basis == SNIPPET:
-                shown = f"{shown} {language.snippet_label}"
+            if verdict.status == MISSING_ENTITY:
+                counts["entities"] += 1  # one removed statement
+                continue
+            shown = sentence
+            if verdict.basis == SNIPPET:
+                shown = f"{sentence} {language.snippet_label}"
                 labelled += 1
             kept.append(shown)
-            claims.append(Claim(shown, tuple(cited), basis))
+            claims.append(Claim(shown, tuple(cited), verdict.basis))
         if kept:
             lines_out.append(prefix + " ".join(kept))
 
     text_out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines_out)).strip()
+    # Figures taken from two or more search pages: their counts are not comparable, and the reader must be told so.
+    figure_sources = {n for claim in claims if numbers_in(claim.text, language) for n in claim.sources}
     return AnswerCheck(
         text=text_out,
         claims=claims,
-        dropped_uncited=dropped_uncited,
-        dropped_relative_time=dropped_relative,
-        dropped_numbers_not_found=not_found,
-        dropped_numbers_snippet_only=snippet_only,
+        dropped_uncited=counts["uncited"],
+        dropped_relative_time=counts["relative"],
+        dropped_numbers_not_found=counts["not_found"],
+        dropped_numbers_snippet_only=counts["snippet_only"],
+        dropped_entities=counts["entities"],
         labelled=labelled,
         cells_filled=cells_filled,
         labels_removed=labels_removed,
+        count_caution=len(figure_sources) >= 2,
     )
 
 

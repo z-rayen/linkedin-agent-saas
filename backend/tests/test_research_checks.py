@@ -174,8 +174,8 @@ def test_an_uncited_sentence_is_dropped_and_counted() -> None:
 
 
 def test_uncited_sentences_are_kept_when_citations_are_not_required() -> None:
-    checked = _check("Acme is hiring.", FULL_EN, require_citations=False)
-    assert checked.text == "Acme is hiring."
+    checked = _check("It is hiring.", FULL_EN, require_citations=False)
+    assert checked.text == "It is hiring."
     assert checked.claims[0].basis == NONE
 
 
@@ -221,9 +221,17 @@ def test_a_table_row_with_a_relative_time_is_dropped() -> None:
 
 def test_a_table_with_a_missing_company_gets_the_not_specified_cell() -> None:
     table = "| Company | Role | Date |\n|---|---|---|\n|  | ML intern | 2026-11-10 [1] |"
-    checked = _check(table, FULL_EN)
+    checked = _check(table, Evidence(text="ML intern role, posted 2026-11-10.", fetched=True))
     assert f"| {EN.not_specified} | ML intern | 2026-11-10 [1] |" in checked.text
     assert checked.cells_filled == 1
+
+
+def test_a_job_title_absent_from_the_cited_sources_is_replaced_not_kept() -> None:
+    table = "| Company | Role |\n|---|---|\n| Acme | ML intern [1] |"
+    checked = _check(table, FULL_EN)  # the page says nothing about an intern role
+    assert "ML intern" not in checked.text
+    assert f"| Acme | {EN.not_specified} [1] |" in checked.text
+    assert checked.dropped_entities == 1
 
 
 def test_a_snippet_only_table_row_gets_the_snippet_label() -> None:

@@ -37,6 +37,16 @@ def _contains_word(haystack_folded: str, word: str) -> bool:
     return _word_pattern(fold(word)).search(haystack_folded) is not None
 
 
+def capitalised_terms(text: str) -> list[str]:
+    """The capitalised words of a text (proper nouns, job titles, acronyms), as written, without a final full stop."""
+    return [term.rstrip(".") for term in CAPITALISED.findall(text)]
+
+
+def contains_term(haystack: str, term: str) -> bool:
+    """Whether `term` appears as a whole word in `haystack`. Case and accents are ignored on both sides."""
+    return _contains_word(fold(haystack), term)
+
+
 def check_text(text: str, cited_text: str, label: str, context_text: str = "") -> list[str]:
     """Problems in `text` that the `cited_text` (and, for numbers and proper terms, `context_text`) do not support."""
     cited_folded = fold(cited_text)

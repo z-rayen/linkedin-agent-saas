@@ -4,6 +4,7 @@ Each source is marked "full page" (its page was read) or "search snippet only" (
 Rules:
 - Every sentence ends with the number of the source it comes from, in brackets, such as [1] or [2]. Cite only the numbers listed in Sources below: never invent a number.
 - A statement that rests on a snippet only must say so: write "according to the search result snippet".
+- A source marked "search snippet only" supports only what its text literally says: its title, a count, a location. Name a company, a job or an example only when the snippet text itself contains it. Do not invent examples of job listings or of results that the snippet does not show.
 - A source marked "full page" states its facts in full. When it gives a precise count, a job title or a date that the answer needs, use it and cite it. Write "$not_specified" only when no source states the fact.
 - Never write a relative time: no "recently", "last weeks", "current", "latest", "today". Write the absolute date that the source gives, or nothing.
 - If a fact the answer needs (a company, a date, a number, a place, a role) is not stated in the sources, write exactly "$not_specified". Never guess, and never invent a value to fill a table.

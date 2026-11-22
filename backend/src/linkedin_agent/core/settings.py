@@ -37,6 +37,7 @@ class ResearchLanguage(BaseModel):
     not_specified: str  # written in an empty table cell, and as the answer to a fact the sources do not give
     relative_time_removed: str  # must contain "{count}": the note that says relative-time statements were removed
     nothing_checked: str  # the answer when no statement could be checked: it must not read as "nothing found"
+    count_caution: str  # added when counts from different search pages are reported: they must not be added up
 
     @model_validator(mode="after")
     def separators_differ(self) -> "ResearchLanguage":
@@ -82,6 +83,9 @@ DEFAULT_RESEARCH_LANGUAGES: dict[str, ResearchLanguage] = {
             "None of the statements could be checked against the sources. This does not mean that nothing was found: "
             "the sources retrieved are listed below."
         ),
+        count_caution=(
+            "Caution: counts taken from different search pages are not comparable, and must not be added up."
+        ),
     ),
     "fr": ResearchLanguage(
         stopwords=[
@@ -126,6 +130,10 @@ DEFAULT_RESEARCH_LANGUAGES: dict[str, ResearchLanguage] = {
         nothing_checked=(
             "Aucune affirmation n'a pu être vérifiée dans les sources. Cela ne signifie pas qu'aucun résultat n'a été "
             "trouvé : les sources consultées sont listées ci-dessous."
+        ),
+        count_caution=(
+            "Attention : les nombres tirés de pages de résultats différentes ne sont pas comparables, "
+            "et ne doivent pas être additionnés."
         ),
     ),
 }

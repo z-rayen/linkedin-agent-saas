@@ -85,21 +85,21 @@ def _run(request: str) -> dict[str, Any]:
 
 
 def test_a_french_request_gets_a_french_answer_with_french_labels(model: dict[str, Any]) -> None:
-    model["answer"] = "Acme publie 7.479 offres [1].\n\n| Entreprise | Poste |\n|---|---|\n|  | Stage ML [1] |"
+    model["answer"] = "Acme publie 7.479 offres [1].\n\n| Entreprise | Poste |\n|---|---|\n|  | 7.479 offres [1] |"
     result = _run("Quelles offres ML en France ?")
 
     assert result["language"] == "fr"
     assert "Acme publie 7.479 offres [1]." in result["answer"]  # 7.479 is 7479 in French: it matches the page
-    assert "| non précisé dans les sources | Stage ML [1] |" in result["answer"]
+    assert "| non précisé dans les sources | 7.479 offres [1] |" in result["answer"]
     assert result["answer"].endswith(f"Sources consultées le {result['retrieved_at']}.")
 
 
 def test_an_english_request_gets_an_english_answer_with_english_labels(model: dict[str, Any]) -> None:
-    model["answer"] = "| Company | Role |\n|---|---|\n|  | ML intern [1] |"
+    model["answer"] = "| Company | Role |\n|---|---|\n|  | 2026-11-10 [1] |"
     result = _run("What are the ML jobs in France?")
 
     assert result["language"] == "en"
-    assert "| not specified in the sources | ML intern [1] |" in result["answer"]
+    assert "| not specified in the sources | 2026-11-10 [1] |" in result["answer"]
     assert result["answer"].endswith(f"Sources retrieved on {result['retrieved_at']}.")
 
 

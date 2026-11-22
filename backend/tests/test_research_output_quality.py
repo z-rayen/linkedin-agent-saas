@@ -238,4 +238,5 @@ def test_a_fetched_page_with_the_figure_is_used_instead_of_not_specified(monkeyp
         "relative_time": 0,
         "numbers_not_found": 0,
         "numbers_snippet_only": 0,
+        "entities_not_found": 0,
     }
