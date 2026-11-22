@@ -9,9 +9,10 @@ and docs/graphs/research_graph.md.
 
 from pathlib import Path
 
+from linkedin_agent.core.settings import DEFAULT_RESEARCH_LANGUAGES
 from linkedin_agent.graphs.application_graph import GraphDeps
 from linkedin_agent.graphs.application_graph import build_graph as build_application_graph
-from linkedin_agent.graphs.research_graph import ResearchDeps, ResearchLimits, ResearchWording
+from linkedin_agent.graphs.research_graph import ResearchDeps, ResearchLimits
 from linkedin_agent.graphs.research_graph import build_graph as build_research_graph
 
 GRAPHS_DIR = Path(__file__).resolve().parents[1] / "docs" / "graphs"
@@ -73,13 +74,11 @@ def export_research_graph() -> None:
             page_max_chars=1500,
             context_max_chars=9000,
             min_relevance=0.3,
+            min_title_matches=2,
             require_citations=True,
         ),
-        wording=ResearchWording(
-            snippet_label="(according to the search result snippet)",
-            not_specified="not specified in the sources",
-            retrieval_line="Sources retrieved on {date}.",
-        ),
+        languages=DEFAULT_RESEARCH_LANGUAGES,
+        default_language="en",
     )
     diagram = build_research_graph(deps).get_graph().draw_mermaid()
     _write(

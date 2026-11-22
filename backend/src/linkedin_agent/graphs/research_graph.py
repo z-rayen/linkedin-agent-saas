@@ -27,7 +27,8 @@ from langgraph.graph import END, START, StateGraph
 
 from ..clock import utcnow
 from ..core.exceptions import ExternalServiceError
-from .research_checks import Evidence, check_answer, check_citations, relevance
+from ..core.settings import ResearchLanguage
+from .research_checks import Evidence, check_answer, check_citations, detect_language, is_relevant
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class ResearchState(TypedDict, total=False):
     history: str
     draft_post: bool
     retrieved_at: str  # the date the sources were retrieved (ISO, UTC)
+    language: str  # the language of the request, which is the language of the answer
     pending_queries: list[str]
     queries_run: list[str]
     sources: list[Source]
@@ -93,15 +95,9 @@ class ResearchLimits:
     max_pages: int
     page_max_chars: int
     context_max_chars: int
-    min_relevance: float  # search results below this share of matching query terms are off-topic
+    min_relevance: float  # a search result must match this share of the query's topic words (title, summary, domain)
+    min_title_matches: int  # ... and this many of them in its title or domain (capped by the query's term count)
     require_citations: bool  # an uncited sentence is dropped
-
-
-@dataclass(frozen=True)
-class ResearchWording:
-    snippet_label: str  # appended to a statement that rests only on search snippets
-    not_specified: str  # written in an empty table cell, or as an answer to a missing fact
-    retrieval_line: str  # "{date}" is the retrieval date; it ends every answer that has sources
 
 
 @dataclass(frozen=True)
@@ -118,12 +114,14 @@ class ResearchDeps:
     search: Callable[[str], Awaitable[list[Hit]]]  # query -> results
     read: Callable[[str], Awaitable[str]]  # url -> page text, "" when refused or unreachable
     reflect: Callable[[str, dict[str, str], list[Source]], Awaitable[Reflection]]
-    synthesize: Callable[[str, dict[str, str], str, list[Source]], Awaitable[str]]  # -> answer with [n] citations
+    # (request, profile, history, shown sources, language code) -> answer with [n] citations
+    synthesize: Callable[[str, dict[str, str], str, list[Source], str], Awaitable[str]]
     draft: Callable[[str, dict[str, str], str], Awaitable[str]]  # (request, profile, answer) -> post text
     save_draft: Callable[[int, str, str], Awaitable[int]]  # (user_id, title, text) -> content queue id
     on_step: Callable[[str], Awaitable[None]]
     limits: ResearchLimits
-    wording: ResearchWording
+    languages: dict[str, ResearchLanguage]  # the answer's wording and number conventions, by language code
+    default_language: str
 
 
 def numbered_block(number: int, source: Source) -> str:
@@ -192,6 +190,9 @@ def after_synthesize(state: ResearchState) -> str:
 def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
     """The compiled research graph. The checkpointer, when given, lets a run resume after a restart."""
     limits = deps.limits
+    # A query's topic words are compared with the stopwords of every configured language: a word that is a stopword
+    # in one of them is not a topic.
+    stopwords = frozenset(word for pack in deps.languages.values() for word in pack.stopwords)
 
     async def plan(state: ResearchState) -> dict[str, Any]:
         try:
@@ -201,8 +202,10 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         cleaned = [query.strip() for query in queries if query.strip()][: limits.max_queries]
         if not cleaned:
             cleaned = [state["request"][:FALLBACK_QUERY_MAX_CHARS]]
+        language = detect_language(state["request"], deps.languages, deps.default_language)
         return {
             "retrieved_at": utcnow().date().isoformat(),
+            "language": language,
             "pending_queries": cleaned,
             "queries_run": [],
             "sources": [],
@@ -233,7 +236,16 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                 link = str(hit["link"])[:LINK_MAX_CHARS]
                 if not link or link in seen or len(sources) >= limits.max_sources:
                     continue
-                if relevance(query, str(hit["title"]), str(hit["summary"]), link) < limits.min_relevance:
+                relevant = is_relevant(
+                    query,
+                    str(hit["title"]),
+                    str(hit["summary"]),
+                    link,
+                    stopwords=stopwords,
+                    min_share=limits.min_relevance,
+                    min_title_matches=limits.min_title_matches,
+                )
+                if not relevant:
                     off_topic += 1  # not read, not shown, not cited
                     continue
                 seen.add(link)
@@ -300,7 +312,13 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
                 "removed_citations": 0,
             }
         try:
-            raw = await deps.synthesize(state["request"], state["profile"], state.get("history", ""), shown)
+            raw = await deps.synthesize(
+                state["request"],
+                state["profile"],
+                state.get("history", ""),
+                shown,
+                state.get("language", deps.default_language),
+            )
         except ExternalServiceError:
             return {
                 "shown": shown,
@@ -314,11 +332,11 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
         cited = check_citations(raw, len(shown))
         if cited.removed:
             logger.warning("research citations removed count=%d", cited.removed)
+        language = deps.languages.get(state.get("language", ""), deps.languages[deps.default_language])
         checked = check_answer(
             cited.text,
             [Evidence(text=source["text"], fetched=source["fetched"]) for source in shown],
-            snippet_label=deps.wording.snippet_label,
-            not_specified=deps.wording.not_specified,
+            language=language,
             require_citations=limits.require_citations,
         )
         unsupported = {
@@ -334,13 +352,15 @@ def build_graph(deps: ResearchDeps, checkpointer: Any = None) -> Any:
             checked.cells_filled,
         )
         answer_ok = bool(checked.text)
-        text = checked.text
-        if answer_ok:
-            # Every answer that rests on sources says when they were retrieved: "current" means nothing without it.
-            text = f"{text}\n\n{deps.wording.retrieval_line.format(date=state['retrieved_at'])}"
+        # The answer ends with what the reader needs to read it: what was removed and why it is not "nothing found",
+        # and the date the sources were retrieved ("current" means nothing without it).
+        parts = [checked.text if answer_ok else language.nothing_checked]
+        if checked.dropped_relative_time:
+            parts.append(language.relative_time_removed.format(count=checked.dropped_relative_time))
+        parts.append(language.retrieval_line.format(date=state["retrieved_at"]))
         return {
             "shown": shown,
-            "answer": text,
+            "answer": "\n\n".join(parts),
             "answer_ok": answer_ok,
             "claims": [
                 {"text": claim.text, "sources": list(claim.sources), "basis": claim.basis} for claim in checked.claims

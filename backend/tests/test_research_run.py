@@ -88,7 +88,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> FakeModel:
 def _run(**overrides: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
         "user_id": 1,
-        "request": "Quelles offres ML en France ?",
+        "request": "What are the ML jobs in France?",
         "profile": PROFILE,
         "history": "",
         "draft_post": False,
@@ -163,7 +163,16 @@ def test_the_answer_prompt_states_the_rules_of_the_checks(world: FakeModel) -> N
 
 
 def test_the_not_specified_rule_is_part_of_the_prompt_contract() -> None:
-    prompt = render("research_answer.v3", field="ML", skills="x", level="y", history="(none)", request="r", sources="s")
+    prompt = render(
+        "research_answer.v3",
+        field="ML",
+        skills="x",
+        level="y",
+        history="(none)",
+        request="r",
+        sources="s",
+        not_specified="not specified in the sources",
+    )
     assert "not specified in the sources" in prompt
     assert "Never guess" in prompt
 

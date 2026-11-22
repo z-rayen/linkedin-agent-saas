@@ -193,36 +193,54 @@ are read.
 | `RESEARCH_CONTEXT_MAX_CHARS` | 9000 | characters of sources in one prompt (about 3000 estimated tokens) |
 | `RESEARCH_STRUCTURED_RETRIES` | 1 | retries of the plan and reflection steps when their JSON does not validate |
 | `RESEARCH_MIN_RELEVANCE` | 0.3 | share of the query's topic words a result must match (title, summary, domain) to be read and shown |
+| `RESEARCH_MIN_TITLE_MATCHES` | 2 | topic words that must also appear in the title or the domain (capped by the query's topic-word count) |
 | `RESEARCH_REQUIRE_CITATIONS` | true | a sentence without a citation is dropped (table rows and headings are kept) |
-| `RESEARCH_SNIPPET_LABEL` | "(according to the search result snippet)" | appended to a statement that rests only on snippets |
-| `RESEARCH_RETRIEVAL_LINE` | "Sources retrieved on {date}." | ends every answer that has sources; `{date}` is the retrieval date (UTC) |
-| `RESEARCH_NOT_SPECIFIED` | "not specified in the sources" | written in an empty table cell, instead of a guess |
+| `RESEARCH_DEFAULT_LANGUAGE` | "en" | the answer's language when the request's words do not reveal one |
+| `RESEARCH_LANGUAGES` | English and French profiles | per language: stopwords (detection), decimal and thousands separators, and the fixed wording |
 
-The three wording settings are fixed text added by the checks: set them in the language of your deployment.
+**Languages.** The language of the answer is the language of the request, detected from its words (the stopwords of
+each profile). Each profile holds the labels the checks add: the snippet label, the retrieval line, the "not specified"
+wording, the notes on removed statements, and the answer used when nothing could be checked. `RESEARCH_LANGUAGES` is a
+JSON object; setting it replaces the whole table, so copy the defaults and add a language to extend it.
+
+**Numbers depend on the language.** In English `2.500` is 2.5 and `2,500` is 2500; in French `2,500` is 2.5 and `2.500`
+is 2500. A figure is checked with the convention of the answer's language, so a figure read with the other convention
+does not match its source. The source text is read with that same convention: a source that writes a number in another
+convention will not match, and that is deliberate.
 
 **Answer checks.** The model writes the answer; code then checks it (`graphs/research_checks.py`, no model involved):
 
 - **Traceability.** Every statement must cite a source. A statement that rests only on search snippets is labelled
   with `RESEARCH_SNIPPET_LABEL`, so it is never presented as verified. A statement with at least one full page is not
   labelled.
-- **Numbers and dates, by value.** A number in a statement must appear, by value, in the text of a source it cites:
-  `2,000` and `2000` are the same, `7,497` and `7479` are not. An ISO date is one unit (`2026-11-11` is not checked
-  part by part). A statement with an unsupported number is dropped.
+- **Numbers and dates, by value.** A number in a statement must appear, by value, in the text of a source it cites
+  (read with the answer language's convention, see above). An ISO date is one unit. A statement with an unsupported
+  number is dropped.
+- **Where a number is found.** A number that appears in a full page is supported by that page. A number that appears
+  only in a search snippet makes its statement snippet-based and labelled, even when another cited source was read in
+  full: the figure itself is what must be verified.
 - **Relative time.** "last two weeks", "recently", "current", "latest", "il y a", "derniers jours" and similar are
-  dropped: their date cannot be checked against the sources. Answers say when their sources were retrieved instead.
-- **Empty cells.** An empty table cell is written as `RESEARCH_NOT_SPECIFIED`. The prompt asks the model for the same
-  wording instead of a guess, and a test runs a model that leaves a field out.
-- **Relevance.** A search result whose title, summary and domain share too few topic words with the query is not read
-  and not shown. The filter keeps everything when the query has no topic word.
+  dropped: their date cannot be checked against the sources. The answer says how many were removed, and that this does
+  not mean nothing was found. If every statement is removed, the answer says that no statement could be checked, and
+  that this does not mean nothing was found either. The counts are in `unsupported.relative_time`.
+- **Empty cells.** An empty table cell is written as the language's "not specified" wording. The prompt asks the model
+  for the same wording instead of a guess, and a test runs a model that leaves a field out.
+- **Relevance.** A search result is read and shown only when it matches at least `RESEARCH_MIN_RELEVANCE` of the
+  query's topic words, and at least `RESEARCH_MIN_TITLE_MATCHES` of them in its title or domain (capped by the number
+  of topic words in the query). Words shorter than three letters are not topic words.
+  *Limits*: the comparison is on words, not meanings. Acronyms of three or more letters ("NLP", "RAG", "SQL") match
+  unrelated pages with the same letters, and a query made only of acronyms can keep unrelated results; a two-letter
+  term ("ML") is ignored, so a query made only of such terms keeps every result.
 
 Each run returns the answer and its traceability, in the result:
 
-- `answer`, `retrieved_at` (the date the sources were retrieved), `claims` (each statement, with `sources` and `basis`
-  `fetched` or `snippet`);
+- `answer`, `retrieved_at` (the date the sources were retrieved), `language` (of the answer), `claims` (each statement,
+  with `sources` and `basis` `fetched` or `snippet`);
 - `sources`: only the sources the answer cites, with their `fetched` flag, so a UI can show which statements rest on a
   full page;
-- `also_found`: the other retrieved sources, which no statement rests on;
-- `unsupported`: counts of the statements dropped, by reason (`uncited`, `relative_time`, `numbers`), and `off_topic`.
+- `also_found`: the other retrieved sources, which no statement rests on. It is kept visible on purpose;
+- `unsupported`: counts of the statements dropped, by reason (`uncited`, `relative_time`, `numbers`), and `off_topic`
+  (search results dropped by the relevance filter).
 
 Per step, `LLM_STEP_OVERRIDES` can set a model and a reasoning effort for `research_plan`, `research_reflect`,
 `research_answer` and `research_post`, as for the other steps.
@@ -239,9 +257,25 @@ about four minutes of budget, plus provider latency and up to four page fetches 
 seven minutes. Each node logs its duration (`research node=... duration_ms=...`), which is the way to check these figures
 on your own data.
 
-**Not yet available: the HTTP endpoint.** Background runs need a table decision first, see
-`docs/adr/0002-research-run-table.md`. Until it is accepted, `POST /agent/ask` keeps its synchronous behaviour and its
-contract, unchanged.
+**HTTP endpoints (asynchronous).**
+
+- `POST /agent/research` with `{"request": "...", "draft_post": false}` returns `202` with a `run_id` and
+  `status: "queued"`. A run takes minutes: poll `GET /agent/research/{run_id}` until `status` is `done` (read `result`)
+  or `failed` (read `error`). `stalled: true` means the heartbeat stopped; the run is resumed or failed at restart.
+- The run id is random (192 bits). Only the user who started the run can read it; anyone else, and an unknown id, get
+  the same `404`. A second run of the same request (case and spacing aside) while the first is active returns `409`.
+- `draft_post: true` saves a LinkedIn post as a **draft** in the content queue. Nothing is published by the run.
+- Restart: a run whose heartbeat stopped is resumed from its checkpoint when one exists, without repeating the steps
+  already done. Without a checkpoint it is marked `failed`, with an instruction to send the request again.
+- The result is stored in the database (`preparation_runs.result_json`). A retention rule for finished runs, and the
+  deletion of a user's runs with the user, are not implemented yet. Research runs share
+  the table of application preparations, with `kind = 'research'`; applications never see them, and the reverse.
+
+`POST /agent/ask` is the earlier synchronous endpoint. Its contract is unchanged.
+
+**Migration 0009** adds `kind` and `result_json` to `preparation_runs`. It is additive: existing rows are applications
+and keep every value. Its downgrade refuses to run while research runs exist, because dropping `kind` would turn them
+into application runs. Delete them first if you really want the downgrade. See `docs/adr/0002-research-run-table.md`.
 
 ## Sending email
 

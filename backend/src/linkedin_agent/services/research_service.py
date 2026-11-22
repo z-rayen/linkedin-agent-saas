@@ -21,7 +21,6 @@ from ..graphs.research_graph import (
     Reflection,
     ResearchDeps,
     ResearchLimits,
-    ResearchWording,
     Source,
     build_graph,
     fit_sources,
@@ -51,15 +50,8 @@ def limits_from(settings: Settings) -> ResearchLimits:
         page_max_chars=settings.research_page_max_chars,
         context_max_chars=settings.research_context_max_chars,
         min_relevance=settings.research_min_relevance,
+        min_title_matches=settings.research_min_title_matches,
         require_citations=settings.research_require_citations,
-    )
-
-
-def wording_from(settings: Settings) -> ResearchWording:
-    return ResearchWording(
-        snippet_label=settings.research_snippet_label,
-        not_specified=settings.research_not_specified,
-        retrieval_line=settings.research_retrieval_line,
     )
 
 
@@ -115,7 +107,7 @@ def build_deps(
 
     async def plan(request: str, user_profile: dict[str, str], history: str) -> list[str]:
         prompt = render(
-            "planner.v1",
+            "planner.v2",
             field=user_profile["field"],
             level=user_profile["level"],
             history=history or NO_EVIDENCE,
@@ -142,7 +134,9 @@ def build_deps(
         judged = await complete_structured(prompt, ReflectOutput, retries=retries, step=STEP_REFLECT)
         return Reflection(sufficient=judged.sufficient, queries=list(judged.queries))
 
-    async def synthesize(request: str, user_profile: dict[str, str], history: str, shown: list[Source]) -> str:
+    async def synthesize(
+        request: str, user_profile: dict[str, str], history: str, shown: list[Source], language_code: str
+    ) -> str:
         prompt = render(
             "research_answer.v3",
             field=user_profile["field"],
@@ -151,6 +145,7 @@ def build_deps(
             history=history or NO_EVIDENCE,
             request=request,
             sources="\n\n".join(numbered_block(number, s) for number, s in enumerate(shown, start=1)),
+            not_specified=settings.research_languages[language_code].not_specified,
         )
         return await complete_text(prompt, step=STEP_ANSWER)
 
@@ -177,7 +172,8 @@ def build_deps(
         save_draft=save_draft,
         on_step=on_step or no_op,
         limits=limits,
-        wording=wording_from(settings),
+        languages=dict(settings.research_languages),
+        default_language=settings.research_default_language,
     )
 
 
@@ -205,6 +201,11 @@ async def run_research(
             "draft_post": draft_post,
         }
     )
+    return result_of(state)
+
+
+def result_of(state: Any) -> dict[str, Any]:
+    """The public result of a finished research graph: the answer, its traceability and what was filtered out."""
     shown: list[Source] = state.get("shown", [])
     claims: list[dict[str, Any]] = state.get("claims", [])
     cited_numbers = sorted({number for claim in claims for number in claim["sources"]})
@@ -214,6 +215,7 @@ async def run_research(
     return {
         "answer": state.get("answer", ""),
         "retrieved_at": state.get("retrieved_at", ""),
+        "language": state.get("language", ""),
         "claims": claims,
         "sources": [
             {

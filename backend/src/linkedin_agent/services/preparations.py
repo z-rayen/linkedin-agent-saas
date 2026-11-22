@@ -94,7 +94,11 @@ def find_run(db: Session, user_id: int, public_id: str) -> models.PreparationRun
     """The run with this public id, only if it belongs to this user. Anyone else gets None, which is a 404."""
     return (
         db.query(models.PreparationRun)
-        .filter(models.PreparationRun.public_id == public_id, models.PreparationRun.user_id == user_id)
+        .filter(
+            models.PreparationRun.public_id == public_id,
+            models.PreparationRun.user_id == user_id,
+            models.PreparationRun.kind == "application",
+        )
         .first()
     )
 
@@ -285,7 +289,11 @@ async def recover_interrupted(now: datetime | None = None) -> int:
     with SessionLocal() as db:
         stale = (
             db.query(models.PreparationRun)
-            .filter(models.PreparationRun.status.in_(ACTIVE), models.PreparationRun.heartbeat_at < cutoff)
+            .filter(
+                models.PreparationRun.kind == "application",  # research runs are recovered by services/research_runs
+                models.PreparationRun.status.in_(ACTIVE),
+                models.PreparationRun.heartbeat_at < cutoff,
+            )
             .all()
         )
         candidates = [run.id for run in stale]

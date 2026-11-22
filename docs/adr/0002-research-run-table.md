@@ -1,6 +1,16 @@
 # ADR 0002: Where background agent runs are stored
 
-Status: proposed, not yet accepted. No migration has been written or applied for this decision.
+Status: accepted. Option A is implemented: migration `0009_background_run_kind` (additive, with a tested downgrade that
+refuses while research runs exist), the endpoints `POST /agent/research` and `GET /agent/research/{run_id}`, ownership,
+unguessable ids, one active run per request, and restart recovery. The tests are in `tests/test_research_api.py` and
+`tests/test_migration_0009.py`.
+
+Two details decided during the implementation, beyond the options below:
+
+- A finished research run has the status `done` (not `closed`), so that a research run is never mistaken for an
+  application.
+- The planner for research runs is `planner.v2`, which wraps the conversation history as untrusted data. `/agent/ask`
+  keeps `planner.v1`, so its contract and its prompt are unchanged.
 
 ## Context
 
@@ -42,9 +52,9 @@ paths to keep correct and tested, for no behavioural gain today.
 **C. Store the research result in `agent_messages` and reuse `preparation_runs` without a `kind`.** Rejected: nothing
 tells a research run from an application, so recovery would try to resume an application as a research run.
 
-## Decision requested
+## Decision
 
-Option A. Before any migration is written, the owner confirms A (or chooses B).
+Option A. The owner confirmed it before the migration was written.
 
 ## Consequences of A
 

@@ -26,6 +26,111 @@ class LLMStepOverride(BaseModel):
     reasoning_effort: ReasoningEffort = ""
 
 
+class ResearchLanguage(BaseModel):
+    """The words, the number conventions and the fixed wording of the research answer in one language."""
+
+    stopwords: list[str] = Field(default_factory=list)  # used to detect the language of a request
+    decimal_separator: Literal[".", ","] = "."
+    thousands_separator: Literal[".", ","] = ","  # a space is always accepted as a thousands separator
+    snippet_label: str  # appended to a statement that rests only on search snippets
+    retrieval_line: str  # must contain "{date}": the retrieval date, which ends every answer that has sources
+    not_specified: str  # written in an empty table cell, and as the answer to a fact the sources do not give
+    relative_time_removed: str  # must contain "{count}": the note that says relative-time statements were removed
+    nothing_checked: str  # the answer when no statement could be checked: it must not read as "nothing found"
+
+    @model_validator(mode="after")
+    def separators_differ(self) -> "ResearchLanguage":
+        if self.decimal_separator == self.thousands_separator:
+            raise ValueError("the decimal and thousands separators must differ")
+        return self
+
+
+DEFAULT_RESEARCH_LANGUAGES: dict[str, ResearchLanguage] = {
+    "en": ResearchLanguage(
+        stopwords=[
+            "the",
+            "and",
+            "of",
+            "in",
+            "for",
+            "are",
+            "is",
+            "what",
+            "which",
+            "with",
+            "to",
+            "on",
+            "at",
+            "by",
+            "from",
+            "how",
+            "where",
+            "when",
+            "about",
+            "who",
+        ],
+        decimal_separator=".",
+        thousands_separator=",",
+        snippet_label="(according to the search result snippet)",
+        retrieval_line="Sources retrieved on {date}.",
+        not_specified="not specified in the sources",
+        relative_time_removed=(
+            'Note: {count} statement(s) with a relative time (such as "recently") were removed, because their date '
+            "cannot be checked against the sources. This does not mean that nothing was found."
+        ),
+        nothing_checked=(
+            "None of the statements could be checked against the sources. This does not mean that nothing was found: "
+            "the sources retrieved are listed below."
+        ),
+    ),
+    "fr": ResearchLanguage(
+        stopwords=[
+            "le",
+            "la",
+            "les",
+            "des",
+            "une",
+            "un",
+            "et",
+            "pour",
+            "dans",
+            "avec",
+            "quels",
+            "quelles",
+            "quel",
+            "quelle",
+            "est",
+            "sur",
+            "que",
+            "qui",
+            "sont",
+            "du",
+            "au",
+            "aux",
+            "en",
+            "entre",
+            "par",
+            "sans",
+            "de",
+        ],
+        decimal_separator=",",
+        thousands_separator=".",
+        snippet_label="(d'après l'extrait du résultat de recherche)",
+        retrieval_line="Sources consultées le {date}.",
+        not_specified="non précisé dans les sources",
+        relative_time_removed=(
+            "Remarque : {count} affirmation(s) à date relative (« récemment », « ces dernières semaines »…) ont été "
+            "retirées, car leur date ne peut pas être vérifiée dans les sources. Cela ne signifie pas qu'aucune offre "
+            "n'a été trouvée."
+        ),
+        nothing_checked=(
+            "Aucune affirmation n'a pu être vérifiée dans les sources. Cela ne signifie pas qu'aucun résultat n'a été "
+            "trouvé : les sources consultées sont listées ci-dessous."
+        ),
+    ),
+}
+
+
 class Settings(BaseSettings):
     # Tests set LINKEDIN_AGENT_NO_ENV_FILE=1 before any import, so backend/.env is never read in tests.
     model_config = SettingsConfigDict(
@@ -107,15 +212,19 @@ class Settings(BaseSettings):
     research_context_max_chars: int = Field(default=9000, ge=1000)
     # Retries of each structured step (plan, reflection) when its answer does not validate.
     research_structured_retries: int = Field(default=1, ge=0)
-    # A search result whose title, summary and domain share less than this fraction of the query's terms is off-topic:
-    # it is not read, not shown and not cited. 0 keeps everything.
+    # A search result is off-topic unless it matches at least this share of the query's topic words, in its title,
+    # summary or domain. Off-topic results are not read, not shown and not cited. 0 keeps everything.
     research_min_relevance: float = Field(default=0.3, ge=0, le=1)
+    # ... and unless at least this many of the query's topic words appear in its title or domain (capped by the number
+    # of topic words in the query). Stops one shared word from keeping an unrelated page. 0 disables the rule.
+    research_min_title_matches: int = Field(default=2, ge=0)
     # A sentence of the answer must cite a source. Uncited sentences are dropped (table rows and headings are kept).
     research_require_citations: bool = True
-    # Fixed wording the answer checks add. Set in the language of the deployment; the defaults are English.
-    research_snippet_label: str = "(according to the search result snippet)"
-    research_retrieval_line: str = "Sources retrieved on {date}."
-    research_not_specified: str = "not specified in the sources"
+    # The language of the answer is detected from the request's words, among these profiles. Labels, the retrieval line
+    # and the number conventions (decimal and thousands separators) come from the profile. Setting this variable
+    # replaces the whole table: copy the defaults and add a language.
+    research_languages: dict[str, ResearchLanguage] = Field(default_factory=lambda: dict(DEFAULT_RESEARCH_LANGUAGES))
+    research_default_language: str = "en"  # used when no language is detected in the request
 
     # Default profile, used until the user saves their own.
     default_field: str = "Machine Learning, Data Science"

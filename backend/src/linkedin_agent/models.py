@@ -147,3 +147,7 @@ class PreparationRun(Base):
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     heartbeat_at = Column(DateTime, default=utcnow)
+    # What the run does: "application" (preparing an application) or "research" (the research agent). A run of one
+    # kind is never read, resumed or reported as the other.
+    kind = Column(String, nullable=False, default="application", server_default="application", index=True)
+    result_json = Column(Text, nullable=True)  # the research answer, once the run is done; empty for applications
