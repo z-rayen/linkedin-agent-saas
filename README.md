@@ -315,7 +315,7 @@ on your own data.
   deletion of a user's runs with the user, are not implemented yet. Research runs share
   the table of application preparations, with `kind = 'research'`; applications never see them, and the reverse.
 
-`POST /agent/ask` is the earlier synchronous endpoint. Its contract is unchanged.
+The earlier synchronous `POST /agent/ask` and its history endpoints were removed: research is the only agent endpoint.
 
 **Migration 0009** adds `kind` and `result_json` to `preparation_runs`. It is additive: existing rows are applications
 and keep every value. Its downgrade refuses to run while research runs exist, because dropping `kind` would turn them
@@ -359,9 +359,10 @@ and applications are never purged by this job.
 to it (profile, knowledge, runs, results, applications, messages, tokens, checkpoints), in one transaction. Another user's
 data is untouched. A wrong password removes nothing.
 
-**Not yet wired.** The watch as a background run (`POST /watch/runs`) and the new profile fields (regions, languages,
-offer type) need two schema migrations; see `docs/adr/0003-watch-graph-streams-retention.md`. Until they are accepted, the
-synchronous `POST /watch/run` keeps its behaviour and its contract.
+**Not yet wired.** The watch cannot be run from the API until its background run (`POST /watch/runs`) and the new profile
+fields (regions, languages, offer type) are wired; both need schema migrations, see
+`docs/adr/0003-watch-graph-streams-retention.md`. The synchronous `POST /watch/run` was removed: it bypassed the run
+pattern (no status, no heartbeat, one model call per result). Results already stored are still listed by `GET /watch/results`.
 
 ## Sending email
 
@@ -396,7 +397,7 @@ sending, and the applications list. Slice 2 adds the research page (sourced answ
 stream with polling as the fallback), profile and knowledge base, the watch with "Prepare application" (which opens the
 form prefilled and never prepares anything by itself), connections (LinkedIn and GitHub: connected, expired or not
 connected), the content queue (edit, then publish after a confirmation), and the account page (deletion with the
-password typed again). The previous plain-HTML app is kept in `frontend/legacy/`. Node 26 is the tested version.
+password typed again). The first plain-HTML app was removed once the React screens covered it. Node 26 is the tested version.
 
 ### Run it in development
 
@@ -440,6 +441,8 @@ Scripts (run from `frontend/`):
 | `npm run format:check` | Prettier check (`npm run format` to fix). |
 | `npm run typecheck` | TypeScript, no emit. |
 | `npm test` | Vitest with Testing Library (review rules, API client, auth redirect, OpenAPI contract). |
+| `npm run gen:types` | Regenerates `src/api/schema.gen.ts` from `openapi.json`. Commit the result. |
+| `npm run check:types` | Fails when the committed `schema.gen.ts` differs from what `openapi.json` generates. CI runs it. |
 
 The API client is checked against the backend's OpenAPI snapshot, `frontend/openapi.json`. To refresh the snapshot after a
 backend change:
@@ -482,12 +485,16 @@ Done in the backend, and used by the frontend:
   `code: password_too_long`).
 - **Email normalisation.** Case and surrounding spaces are removed on registration and login. Accounts created before
   this change with mixed-case addresses no longer match: normalise `users.email` in a data migration before deploying.
-- **Failed-login delay.** The first `LOGIN_FREE_FAILURES` (default 3) failures are free. After that, the wait before the
-  next attempt doubles with each failure (`LOGIN_BASE_DELAY_SECONDS`, default 2), capped at
-  `LOGIN_MAX_DELAY_SECONDS` (default 900). An attempt during the wait is refused with 429 (`code: rate_limited`,
-  `retry_after_seconds`), even with the right password. Nothing is locked for good: a quiet period of
-  `LOGIN_FORGET_SECONDS` (default 3600) forgets the count. The state is in memory, per process. See
+- **Failed-login delay.** Failures are counted per (account, client address) pair: the first `LOGIN_FREE_FAILURES`
+  (default 3) of a pair are free, then the wait before its next attempt doubles (`LOGIN_BASE_DELAY_SECONDS`, default 2),
+  capped at `LOGIN_MAX_DELAY_SECONDS` (default 900). A third party's failures from their own address never slow the owner
+  down. Per client address across all accounts there is a higher ceiling, `LOGIN_ADDRESS_FREE_FAILURES` (default 20). An
+  attempt during a wait is refused with 429 (`code: rate_limited`, `retry_after_seconds`), even with the right password.
+  A quiet period of `LOGIN_FORGET_SECONDS` (default 3600) forgets a count. The state is in memory, per process. See
   [ADR 0004](docs/adr/0004-login-delay-and-trusted-proxies.md).
+- **Email addresses** are stored lowercased and trimmed. Migration `0010_normalise_user_emails` applies that to existing
+  accounts. If two accounts would share an address once normalised, the migration stops and names them: merge or delete
+  one, then run it again. Nothing is changed partly.
 - **Client address behind a proxy.** `TRUSTED_PROXIES` lists the reverse proxies whose `X-Forwarded-For` is believed
   (comma-separated IPs or CIDR networks, validated at startup). Empty means the connection's own address is used. In
   development, Vite sends the header (`xfwd: true`); set `TRUSTED_PROXIES=127.0.0.1` in `backend/.env` so the limit sees
@@ -496,7 +503,12 @@ Done in the backend, and used by the frontend:
 - **Account deletion with a wrong password** answers `403` (not `401`), so the frontend does not treat it as an
   expired session.
 - **Connections**: `GET /oauth/connections` returns `connected`, `expired` or `not_connected` for LinkedIn and GitHub.
-  The OAuth callbacks now return to the React page `/connections`.
+  `DELETE /oauth/{provider}` deletes the caller's stored token. GitHub's grant is also revoked at GitHub; LinkedIn has no
+  public revocation endpoint, so the answer says `not_supported` and the user revokes it in LinkedIn's settings. The OAuth
+  callbacks return to the React page `/connections`.
+- **Removed**: `POST /agent/ask` and its history endpoints, `POST /apply/prepare/{id}`, and the synchronous
+  `POST /watch/run`. They bypassed the safeguards of the application pipeline or the run pattern. Research is the only
+  agent endpoint; the watch has no way to run until its background run is wired (see "Not yet wired" above).
 - **Content**: `PATCH /content/{id}` edits a post's title or text (not after publication). Publishing a post that is
   already published is refused (409).
 - **`cv.pdf`** is declared as `application/pdf` in the OpenAPI.
@@ -505,10 +517,9 @@ Done in the backend, and used by the frontend:
 
 Still not done:
 
-1. **Disconnecting a provider** from the application: there is no endpoint yet; the connections page says so.
-2. **CORS and production origin.** Not needed while the browser uses the nginx proxy or the Vite proxy. It is needed
+1. **CORS and production origin.** Not needed while the browser uses the nginx proxy or the Vite proxy. It is needed
    only if the frontend is served from another origin; then `FRONTEND_ORIGIN` must list that origin.
-3. **Optional: `httpOnly` cookie authentication** (login sets the cookie, CSRF protection on unsafe methods, a logout
+2. **Optional: `httpOnly` cookie authentication** (login sets the cookie, CSRF protection on unsafe methods, a logout
    endpoint). This removes the token from the browser's JavaScript. It is a trade-off to decide in an ADR.
 
 ## Retired variables

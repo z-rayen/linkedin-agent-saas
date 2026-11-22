@@ -26,7 +26,7 @@ from .core.settings import Settings, get_settings, retired_variable_warnings
 from .cv.compile import ensure_tectonic_at_startup
 from .infra.checkpoint import checkpointer_lifespan
 from .infra.embeddings import get_embedder
-from .routers import agent, applications, apply, auth, content, engage, oauth, profile, runs, watch
+from .routers import agent, applications, auth, content, engage, oauth, profile, runs, watch
 from .services import preparations, research_runs, retention
 
 settings = get_settings()
@@ -122,7 +122,6 @@ app.include_router(watch.router)
 app.include_router(profile.router)
 app.include_router(agent.router)
 app.include_router(engage.router)
-app.include_router(apply.router)
 app.include_router(applications.router)
 app.include_router(runs.router)
 

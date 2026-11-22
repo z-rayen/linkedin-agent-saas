@@ -81,5 +81,5 @@ The run itself needs no migration: its `kind` is `watch`, a string value of the 
 - Duration at 8000 tokens per minute (estimate, to check with the logs): a typical run needs about 1 to 2 minutes; the
   worst case (12 candidates, every call retried once, four pages read) is about 5 to 6 minutes. Most of it is the wait for
   the token budget.
-- The synchronous `POST /watch/run` keeps its contract (its characterization tests are unchanged). It still makes one
-  scoring call per result; the asynchronous run replaces it for new clients.
+- The synchronous `POST /watch/run` was removed before publication: it made one scoring call per result with no run record,
+  and bypassed the run pattern. The asynchronous run is the only way to start a watch, once it is wired.

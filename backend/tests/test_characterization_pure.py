@@ -11,7 +11,6 @@ import pytest
 
 from linkedin_agent.services import agent_service
 from linkedin_agent.services.apply_service import find_application_email
-from linkedin_agent.services.search_service import build_cert_queries, build_job_queries
 
 # The planner now calls the LLM through the provider class; patching its method keeps the test provider-agnostic.
 LLM_COMPLETE = "linkedin_agent.infra.llm.GroqClient.complete"
@@ -37,26 +36,6 @@ def test_email_is_lowercased_and_deduplicated() -> None:
 
 def test_email_returns_none_when_page_has_no_address() -> None:
     assert find_application_email("<p>No contact here</p>") is None
-
-
-# --- search_service query builders ------------------------------------------
-
-
-def test_job_queries_are_built_from_field_and_level() -> None:
-    assert build_job_queries("NLP", "Junior") == [
-        "remote NLP jobs hiring now",
-        "Junior NLP job openings 2026",
-    ]
-
-
-def test_cert_queries_use_at_most_three_skills() -> None:
-    queries = build_cert_queries("MLOps", "Python, SQL, AWS, Docker")
-    assert queries == [
-        "free MLOps certification 2026",
-        "free Python course certification",
-        "free SQL course certification",
-        "free AWS course certification",
-    ]
 
 
 # --- agent_service ----------------------------------------------------------

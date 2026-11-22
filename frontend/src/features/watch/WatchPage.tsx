@@ -1,9 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { endpoints } from "../../api/endpoints";
 import type { WatchResult } from "../../api/types";
 import { ApiErrorMessage } from "../../components/ApiErrorMessage";
-import { Banner } from "../../components/Banner";
 import { EmptyState } from "../../components/EmptyState";
 import { Loading } from "../../components/Loading";
 import { useI18n, type Translate } from "../../i18n/I18nProvider";
@@ -14,18 +13,10 @@ import { watchKeys } from "./keys";
  * The preparation itself is a separate, reviewed step. */
 export function WatchPage() {
   const { t } = useI18n();
-  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: watchKeys.results,
     queryFn: ({ signal }) => endpoints.watchResults(signal),
-  });
-
-  const run = useMutation({
-    mutationFn: () => endpoints.runWatch(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: watchKeys.results });
-    },
   });
 
   return (
@@ -35,22 +26,7 @@ export function WatchPage() {
           <h1>{t("watch.title")}</h1>
           <p className="muted">{t("watch.intro")}</p>
         </div>
-        <button
-          type="button"
-          className="button button-primary"
-          disabled={run.isPending}
-          onClick={() => {
-            run.mutate();
-          }}
-        >
-          {run.isPending ? t("watch.running") : t("watch.run")}
-        </button>
       </div>
-
-      {run.isSuccess ? (
-        <Banner tone="success">{t("watch.ran", { count: run.data.new_items })}</Banner>
-      ) : null}
-      <ApiErrorMessage error={run.error} />
 
       {query.isPending ? <Loading /> : null}
       {query.isError ? <ApiErrorMessage error={query.error} /> : null}

@@ -112,11 +112,14 @@ def test_a_research_run_is_accepted_at_once_and_its_result_is_polled(
     ]
 
 
-def test_the_exchange_joins_the_agent_history(client: TestClient, auth_headers: dict[str, str], world: World) -> None:
+def test_the_exchange_is_stored_in_the_agent_history(
+    client: TestClient, auth_headers: dict[str, str], world: World
+) -> None:
     _post(client, auth_headers, "What are the ML jobs in France?")
-    history = client.get("/agent/history", headers=auth_headers).json()
-    assert [m["role"] for m in history] == ["user", "assistant"]
-    assert history[0]["content"] == "What are the ML jobs in France?"
+    with SessionLocal() as db:
+        rows = db.query(models.AgentMessage).order_by(models.AgentMessage.id).all()
+    assert [m.role for m in rows] == ["user", "assistant"]
+    assert rows[0].content == "What are the ML jobs in France?"
 
 
 def test_a_requested_post_is_saved_as_a_draft_and_never_published(

@@ -21,6 +21,7 @@ import type {
   ContentItem,
   ResearchRun,
   ResearchStart,
+  ProviderRevocation,
 } from "./types";
 
 const applicationPath = (id: number): string => `/applications/${String(id)}`;
@@ -123,8 +124,12 @@ export const endpoints = {
   watchResults: (signal?: AbortSignal) =>
     apiRequest<WatchResult[]>("/watch/results", signal ? { signal } : {}),
 
-  runWatch: () =>
-    apiRequest<{ new_items: number; titles: string[] }>("/watch/run", { method: "POST" }),
+  /** Disconnects a provider: the stored token is deleted, and revoked at the provider when it can be. */
+  disconnect: (provider: Provider) =>
+    apiRequest<{ provider: Provider; status: string; provider_revoked: ProviderRevocation }>(
+      `/oauth/${provider}`,
+      { method: "DELETE" },
+    ),
 
   connections: (signal?: AbortSignal) =>
     apiRequest<Connection[]>("/oauth/connections", signal ? { signal } : {}),

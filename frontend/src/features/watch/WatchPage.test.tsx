@@ -7,7 +7,7 @@ import { renderPage } from "../../test/renderPage";
 import { WatchPage, prepareQuery } from "./WatchPage";
 
 vi.mock("../../api/endpoints", () => ({
-  endpoints: { watchResults: vi.fn(), runWatch: vi.fn() },
+  endpoints: { watchResults: vi.fn() },
 }));
 
 const api = vi.mocked(endpoints);

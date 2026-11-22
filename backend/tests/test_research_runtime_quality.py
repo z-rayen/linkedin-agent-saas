@@ -30,17 +30,16 @@ def _user_id(email: str) -> int:
 def test_json_declares_utf8_and_accents_round_trip_through_the_api_and_the_database(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    with SessionLocal() as db:
-        db.add(models.AgentMessage(user_id=_user_id("alice@example.com"), role="assistant", content=ACCENTED))
-        db.commit()
+    created = client.post("/profile/knowledge", json={"content": ACCENTED}, headers=auth_headers)
+    assert created.status_code == 200
 
-    response = client.get("/agent/history", headers=auth_headers)
+    response = client.get("/profile/knowledge", headers=auth_headers)
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json; charset=utf-8"
-    assert response.json() == [{"role": "assistant", "content": ACCENTED}]
+    assert response.json() == [{"id": created.json()["id"], "content": ACCENTED}]
 
     with SessionLocal() as db:
-        assert db.query(models.AgentMessage).one().content == ACCENTED  # stored unchanged
+        assert db.query(models.ProfileKnowledge).one().content == ACCENTED  # stored unchanged
 
 
 def test_error_responses_are_utf8_json_too(client: TestClient, auth_headers: dict[str, str]) -> None:

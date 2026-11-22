@@ -185,6 +185,9 @@ export interface WatchResult {
 export type ConnectionStatus = "connected" | "expired" | "not_connected";
 export type Provider = "linkedin" | "github";
 
+/** What the provider side of a disconnect did. `not_supported`: the provider has no revocation endpoint. */
+export type ProviderRevocation = "revoked" | "not_supported" | "failed";
+
 export interface Connection {
   readonly provider: Provider;
   readonly status: ConnectionStatus;

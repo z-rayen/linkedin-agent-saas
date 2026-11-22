@@ -292,5 +292,5 @@ def test_deleting_the_account_removes_every_row_of_the_user_and_nothing_of_the_o
     assert _count(models.PreparationRun, bob) == 1
     assert _count(models.WatchResult, bob) == 1
     assert _count(models.Application, bob) == 1
-    assert client.get("/agent/history", headers=auth_headers).status_code == 401  # the token no longer works
-    assert client.get("/agent/history", headers=bob_headers).status_code == 200
+    assert client.get("/applications", headers=auth_headers).status_code == 401  # the token no longer works
+    assert client.get("/applications", headers=bob_headers).status_code == 200

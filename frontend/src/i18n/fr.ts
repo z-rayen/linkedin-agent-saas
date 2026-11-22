@@ -159,9 +159,6 @@ export const fr = {
     title: "Veille",
     intro:
       "Offres et certifications trouvées pour ton profil. Une offre peut devenir une candidature : la préparation se fait ensuite, avec ta relecture.",
-    run: "Lancer la veille",
-    running: "Veille en cours. Cela peut prendre plusieurs minutes.",
-    ran: "Veille terminée : {count} nouveau(x) résultat(s).",
     empty: "Aucun résultat pour l'instant. Lance la veille, ou complète ton profil.",
     typeJob: "Offre",
     typeCert: "Certification",
@@ -192,8 +189,17 @@ export const fr = {
     reconnect: "Reconnecter",
     redirecting: "Redirection vers le site du fournisseur…",
     success: "{provider} est connecté.",
-    noDisconnect:
-      "L'application ne peut pas encore retirer un accès. Pour révoquer, utilise les paramètres de sécurité du fournisseur.",
+    disconnect: "Déconnecter",
+    disconnectConfirm:
+      "Déconnecter {provider} ? Le jeton est supprimé de l'application : les publications et les lectures qui passent par ce compte s'arrêtent.",
+    confirmDisconnect: "Oui, déconnecter",
+    cancel: "Annuler",
+    disconnected: "{provider} est déconnecté.",
+    revokedAtProvider: "L'accès a aussi été révoqué chez {provider}.",
+    revokeNotSupported:
+      "{provider} ne permet pas de révoquer l'accès depuis l'application : fais-le dans les paramètres de sécurité de {provider}.",
+    revokeFailed:
+      "L'accès n'a pas pu être révoqué chez {provider}. Révoque-le dans les paramètres de sécurité de {provider}.",
   },
   content: {
     title: "Contenu",

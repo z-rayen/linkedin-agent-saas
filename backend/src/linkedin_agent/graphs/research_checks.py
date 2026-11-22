@@ -243,14 +243,62 @@ MISSING_ENTITY = "missing_entity"
 OK = "ok"
 
 
+# Job titles end with a role word. A title is a phrase of two or three words ending with one of these, and it must
+# appear in the cited sources like a name does: "Machine Learning Engineer" is checked, whatever its capitals.
+ROLE_HEAD_WORDS: frozenset[str] = frozenset(
+    fold(word)
+    for word in (
+        "engineer", "engineers", "scientist", "analyst", "developer", "researcher", "architect", "intern",
+        "internship", "stagiaire", "ingénieur", "ingenieur", "chercheur", "développeur", "developpeur", "analyste",
+        "alternant", "alternance",
+    )
+)  # fmt: skip
+TITLE_STOP_WORDS: frozenset[str] = frozenset(
+    fold(word)
+    for word in (
+        "a", "an", "the", "our", "your", "as", "and", "or", "of", "in", "at", "for", "with", "to", "un", "une", "le",
+        "la", "les", "de", "du", "des", "au", "aux", "pour", "chez", "dans", "en", "et", "ou",
+    )
+)  # fmt: skip
+MAX_TITLE_WORDS = 3
+TITLE_WORD = re.compile(r"[^\W\d_][\w'’-]*")
+
+
+def title_phrases_in(statement: str) -> list[str]:
+    """The job titles a statement names: a modifier of one or two words followed by a role word. The words must be
+    next to each other, separated by spaces only, so a title never borrows a word from the cell or clause before it."""
+    text = CITATION_MARKER.sub(" ", statement)
+    matches = list(TITLE_WORD.finditer(text))
+    phrases: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        if fold(match.group(0)) not in ROLE_HEAD_WORDS:
+            continue
+        first = index
+        while (
+            first > 0
+            and index - first < MAX_TITLE_WORDS - 1
+            and re.fullmatch(r"[ 	]+", text[matches[first - 1].end() : matches[first].start()])
+            and fold(matches[first - 1].group(0)) not in TITLE_STOP_WORDS
+            and fold(matches[first - 1].group(0)) not in ROLE_HEAD_WORDS
+        ):
+            first -= 1
+        if index - first < 1:  # a bare role word ("an engineer") names no title
+            continue
+        phrase = text[matches[first].start() : match.end()]
+        phrases.setdefault(fold(phrase), phrase)
+    return list(phrases.values())
+
+
 def entities_in(statement: str) -> list[str]:
-    """The distinct capitalised terms of a statement that must be found in its cited sources, as written."""
+    """The distinct capitalised terms and job titles of a statement that its cited sources must contain, as written."""
     seen: dict[str, str] = {}
     for term in capitalised_terms(CITATION_MARKER.sub(" ", statement)):
         key = fold(term)
         if not key or key in ENTITY_COMMON or key in NON_CLAIM_FOLDED or term.isdigit():
             continue
         seen.setdefault(key, term)
+    for title in title_phrases_in(statement):
+        seen.setdefault(fold(title), title)
     return list(seen.values())
 
 

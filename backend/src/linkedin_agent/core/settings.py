@@ -165,6 +165,8 @@ class Settings(BaseSettings):
     # Failed logins: the first ones are free. After that the wait before the next attempt doubles with each failure,
     # up to a cap. A quiet period with no failure forgets the count. See docs/adr/0004 for the reasons.
     login_free_failures: int = Field(default=3, ge=1)
+    # Per client address, across every account: a higher ceiling, so one machine cannot try many accounts quickly.
+    login_address_free_failures: int = Field(default=20, ge=1)
     login_base_delay_seconds: float = Field(default=2.0, gt=0)
     login_max_delay_seconds: float = Field(default=900.0, gt=0)
     login_forget_seconds: float = Field(default=3600.0, gt=0)

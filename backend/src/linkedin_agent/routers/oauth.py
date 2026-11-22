@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -10,8 +11,8 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..auth_utils import create_oauth_state, get_current_user, verify_oauth_state
 from ..clock import utcnow
-from ..core.crypto import encrypt_secret
-from ..core.exceptions import InvalidOAuthStateError, http_error
+from ..core.crypto import decrypt_secret, encrypt_secret
+from ..core.exceptions import InvalidOAuthStateError, NotFoundError, http_error
 from ..core.settings import get_settings
 from ..database import get_db
 
@@ -23,6 +24,11 @@ LINKEDIN_SCOPES = "openid profile email w_member_social"
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_SCOPES = "read:user repo"
+# GitHub revokes an app grant with the app's own credentials. LinkedIn has no public revocation endpoint.
+GITHUB_GRANT_URL = "https://api.github.com/applications/{client_id}/grant"
+REVOKED = "revoked"
+NOT_SUPPORTED = "not_supported"
+FAILED = "failed"
 # The React page that shows the connections: the callbacks return the user there, with the outcome in the query.
 CONNECTIONS_PAGE = "/connections"
 PROVIDERS = ("linkedin", "github")
@@ -173,3 +179,48 @@ async def github_callback(code: str, state: str, db: Session = Depends(get_db)):
     db.commit()
 
     return RedirectResponse(f"{settings.frontend_origin}{CONNECTIONS_PAGE}?provider=github&status=connected")
+
+
+async def _revoke_at_provider(provider: str, token: str) -> str:
+    """Asks the provider to revoke the grant. Returns revoked, not_supported, or failed. Never raises: the local
+    disconnect happens either way, and the answer tells the user whether the provider side must be done by hand."""
+    if provider != "github":
+        return NOT_SUPPORTED
+    settings = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.request(
+                "DELETE",
+                GITHUB_GRANT_URL.format(client_id=settings.github_client_id),
+                auth=(settings.github_client_id, settings.github_client_secret),
+                json={"access_token": token},
+                headers={"Accept": "application/vnd.github+json"},
+            )
+    except httpx.HTTPError:
+        return FAILED
+    return REVOKED if response.status_code == 204 else FAILED
+
+
+@router.delete(
+    "/{provider}",
+    summary="Disconnect a provider: deletes the stored token and revokes it at the provider when it can",
+)
+async def disconnect(
+    provider: Literal["linkedin", "github"],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Only the caller's own token is touched. The answer's `provider_revoked` says what happened at the provider:
+    `revoked`, `not_supported` (LinkedIn: revoke it in the LinkedIn settings) or `failed` (revoke it by hand)."""
+    row = (
+        db.query(models.OAuthToken)
+        .filter(models.OAuthToken.user_id == current_user.id, models.OAuthToken.provider == provider)
+        .first()
+    )
+    if row is None:
+        raise http_error(NotFoundError("This provider is not connected"))
+    token = decrypt_secret(row.access_token)
+    revoked = await _revoke_at_provider(provider, token) if token is not None else NOT_SUPPORTED
+    db.delete(row)
+    db.commit()
+    return {"provider": provider, "status": "disconnected", "provider_revoked": revoked}

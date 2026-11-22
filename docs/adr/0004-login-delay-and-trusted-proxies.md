@@ -12,19 +12,29 @@ The first version of the login limit locked an account, and an address, for a wi
   container connect to the API, so every browser looked like the proxy's address. The per-address count then covered
   all users together: one user's failures locked everyone out, and no real client was counted separately.
 
-## Decision 1: a delay that grows, not a lockout
+## Decision 1: a delay per (account, address) pair, and a higher ceiling per address
 
-- The first `LOGIN_FREE_FAILURES` (default 3) failures are free: a user who mistypes a password is not slowed down.
-- After that, the wait before the next attempt doubles with each failure: `LOGIN_BASE_DELAY_SECONDS` (default 2),
-  then 4, 8, ... capped at `LOGIN_MAX_DELAY_SECONDS` (default 900).
-- An attempt before the wait is over is refused with 429 and `retry_after_seconds`. The right password is refused too,
-  because the check happens before the password is compared, so the delay cannot be bypassed by guessing right.
-- A success clears the account's count. A quiet period of `LOGIN_FORGET_SECONDS` (default 3600) without failure
-  forgets the count of either key.
-- The account and the address are counted separately. The longer of the two waits applies.
+Failures are counted under two keys, never under the account alone:
 
-Trade-off: a delay does not stop a patient attacker. It makes online guessing slow (at the cap, one attempt every
-15 minutes per account) and does not lock the owner out: the owner waits, and a later attempt is allowed.
+- **The pair (account, client address).** The first `LOGIN_FREE_FAILURES` (default 3) failures of a pair are free. After
+  that, the wait before the pair's next attempt doubles with each failure: `LOGIN_BASE_DELAY_SECONDS` (default 2), then
+  4, 8, ... capped at `LOGIN_MAX_DELAY_SECONDS` (default 900). A success by the pair clears its count.
+- **The address alone, across every account.** A higher ceiling, `LOGIN_ADDRESS_FREE_FAILURES` (default 20), with the same
+  wait rule. It stops one machine from trying many accounts quickly. A success does not clear it.
+
+Why the pair and not the account: a count per account lets anyone who knows an email address lock its owner out, from
+any address, for as long as they keep failing. With the pair, a third party's failures count only for their own address;
+the owner, from their own address, is not slowed down. Guessing from one address is still slow, because the pair and the
+address ceiling both grow the wait.
+
+An attempt made before the longer of the two waits is over is refused with 429 and `retry_after_seconds`. The right
+password is refused too, because the check happens before the password is compared, so the delay cannot be bypassed by
+guessing right. A quiet period of `LOGIN_FORGET_SECONDS` (default 3600) without failure forgets a count.
+
+Trade-off: a delay does not stop a patient attacker who rotates addresses. It makes online guessing slow (at the cap, one
+attempt every 15 minutes per pair) and makes the owner's own login work from their own address without waiting for someone
+else's failures. Stopping rotation completely needs per-account signals (for example a notice to the owner), which are not
+built.
 
 ## Decision 2: X-Forwarded-For only from a trusted proxy
 
@@ -45,5 +55,8 @@ sender and are never used. A malformed entry in `TRUSTED_PROXIES` fails at start
 - The per-address limit now counts real clients behind the Vite and nginx proxies, when `TRUSTED_PROXIES` lists them.
 - State stays in memory, per process. With several API workers the effective limit multiplies, as for the stream
   tickets (ADR 0003). The fix is a shared store, decided with the multi-worker deployment.
-- A changed behaviour: a locked response (429 for the whole window) became a 429 with a retry time that grows. Clients
-  that read `retry_after_seconds` can show the wait; the frontend shows the rate-limit message.
+- Behaviour changes: nothing is locked for a whole window any more. A refused attempt carries `retry_after_seconds`,
+  which grows with each failure of the pair. Clients that read it can show the wait; the frontend shows the rate-limit
+  message.
+- The first version counted per account and per address and refused everything for a window. It is replaced: that
+  design let a third party lock someone else out.

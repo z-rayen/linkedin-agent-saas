@@ -1,7 +1,8 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { endpoints } from "../../api/endpoints";
-import type { Connection, ConnectionStatus, Provider } from "../../api/types";
+import type { Connection, ConnectionStatus, Provider, ProviderRevocation } from "../../api/types";
 import { ApiErrorMessage } from "../../components/ApiErrorMessage";
 import { Banner } from "../../components/Banner";
 import { Loading } from "../../components/Loading";
@@ -67,8 +68,6 @@ export function ConnectionsPage() {
             );
           })
         : null}
-
-      <p className="hint">{t("connections.noDisconnect")}</p>
     </section>
   );
 }
@@ -89,6 +88,8 @@ function ConnectionCard({
   readonly connection: Connection | null;
 }) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
   const status: ConnectionStatus = connection?.status ?? "not_connected";
   const needed =
     provider === "linkedin" ? t("connections.neededForLinkedin") : t("connections.neededForGithub");
@@ -101,6 +102,16 @@ function ConnectionCard({
   });
 
   const action = status === "not_connected" ? t("connections.connect") : t("connections.reconnect");
+  const name = providerName(provider, t);
+
+  const disconnect = useMutation({
+    mutationFn: () => endpoints.disconnect(provider),
+    onSuccess: () => {
+      setConfirming(false);
+      void queryClient.invalidateQueries({ queryKey: connectionKeys.connections });
+    },
+  });
+  const revocation: ProviderRevocation | undefined = disconnect.data?.provider_revoked;
 
   return (
     <article className="card" aria-labelledby={`connection-${provider}`}>
@@ -135,7 +146,60 @@ function ConnectionCard({
         >
           {action}
         </button>
+        {status !== "not_connected" ? (
+          <button
+            type="button"
+            className="button"
+            disabled={disconnect.isPending}
+            onClick={() => {
+              setConfirming(true);
+            }}
+          >
+            {t("connections.disconnect")}
+          </button>
+        ) : null}
       </div>
+
+      {confirming ? (
+        <div className="card" role="alertdialog" aria-label={t("connections.disconnect")}>
+          <p>{t("connections.disconnectConfirm", { provider: name })}</p>
+          <div className="actions">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={disconnect.isPending}
+              onClick={() => {
+                disconnect.mutate();
+              }}
+            >
+              {t("connections.confirmDisconnect")}
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                setConfirming(false);
+              }}
+            >
+              {t("connections.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <ApiErrorMessage error={disconnect.error} />
+      {disconnect.isSuccess ? (
+        <Banner
+          tone={revocation === "failed" || revocation === "not_supported" ? "warning" : "success"}
+        >
+          {t("connections.disconnected", { provider: name })}{" "}
+          {revocation === "revoked" ? t("connections.revokedAtProvider", { provider: name }) : null}
+          {revocation === "not_supported"
+            ? t("connections.revokeNotSupported", { provider: name })
+            : null}
+          {revocation === "failed" ? t("connections.revokeFailed", { provider: name }) : null}
+        </Banner>
+      ) : null}
     </article>
   );
 }

@@ -21,6 +21,7 @@ Known limits are documented as xfail cases in the tests: unlisted technologies, 
 and meaning changes that reuse the same words.
 """
 
+import json
 import re
 
 from .email import without_signature
@@ -188,7 +189,40 @@ def verify_email(subject: str, body: str, cv: TailoredCV, master: MasterCV, job_
     `job_context` (job title, company) is allowed for proper terms and numbers only.
     """
     written = without_signature(body, master)
-    return check_text(f"{subject}\n{written}", cited_text_of(cv, master), "email body", job_context)
+    email_text = f"{subject}\n{written}"
+    return check_text(email_text, cited_text_of(cv, master), "email body", job_context) + check_links_and_addresses(
+        email_text, master
+    )
+
+
+LINK = re.compile(r"(?:https?://|www\.)[^\s<>\"'()\[\]]+", re.IGNORECASE)
+ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+TRAILING_PUNCTUATION = ".,;:!?"
+
+
+def _link_key(token: str) -> str:
+    """A link or an address as it is compared: no scheme, no "www.", no trailing slash or punctuation, lower case."""
+    key = token.strip().rstrip(TRAILING_PUNCTUATION).lower()
+    for prefix in ("https://", "http://", "www."):
+        if key.startswith(prefix):
+            key = key[len(prefix) :]
+    return key.rstrip("/")
+
+
+def check_links_and_addresses(text: str, master: MasterCV) -> list[GroundingProblem]:
+    """Every link and every e-mail address in the text must be one the master CV contains: a contact detail, a link,
+    or a fact. A model can invent a plausible address or a company page; that is refused, not corrected."""
+    haystack = _link_key(json.dumps(master.model_dump(), ensure_ascii=False))
+    problems: dict[str, GroundingProblem] = {}
+    for token in LINK.findall(text) + ADDRESS.findall(text):
+        key = _link_key(token)
+        if not key or key in haystack:
+            continue
+        message = f"email body: the link or address '{token.rstrip(TRAILING_PUNCTUATION)}' is not in the master CV"
+        problems.setdefault(
+            message, GroundingProblem(message, kind="unknown_source", location="email body", term=token)
+        )
+    return list(problems.values())
 
 
 def check_output(cv: TailoredCV, subject: str, body: str, master: MasterCV, job_context: str) -> list[GroundingProblem]:

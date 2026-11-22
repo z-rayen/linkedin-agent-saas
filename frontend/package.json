@@ -13,10 +13,13 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "openapi:check": "vitest run src/api/contract.test.ts"
+    "openapi:check": "vitest run src/api/contract.test.ts",
+    "gen:types": "npx --yes openapi-typescript@7.13.0 openapi.json -o src/api/schema.gen.ts",
+    "check:types": "node scripts/check-generated-types.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^8.0.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.13",

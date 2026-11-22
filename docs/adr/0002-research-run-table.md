@@ -9,8 +9,8 @@ Two details decided during the implementation, beyond the options below:
 
 - A finished research run has the status `done` (not `closed`), so that a research run is never mistaken for an
   application.
-- The planner for research runs is `planner.v2`, which wraps the conversation history as untrusted data. `/agent/ask`
-  keeps `planner.v1`, so its contract and its prompt are unchanged.
+- The planner for research runs is `planner.v2`, which wraps the conversation history as untrusted data. The earlier
+  synchronous `/agent/ask` (with `planner.v1`) was removed in the cleanup that followed this ADR.
 
 ## Context
 
@@ -70,4 +70,4 @@ Option A. The owner confirmed it before the migration was written.
 
 A research run drafts a LinkedIn post only when the request carries an explicit flag (`draft_post`), set by the
 client. The planner's intent is not used to decide it. This is a choice the owner should confirm: the existing
-`POST /agent/ask` still uses the planner's intent, and it is left unchanged.
+The planner's intent is no longer used for that decision, since `POST /agent/ask` was removed.

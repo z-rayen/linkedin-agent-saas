@@ -58,7 +58,7 @@ def login(user: schemas.UserCreate, request: Request, db: Session = Depends(get_
         LOGIN_GUARD.record_failure(user.email, address)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    LOGIN_GUARD.record_success(user.email)
+    LOGIN_GUARD.record_success(user.email, address)
     token = auth_utils.create_access_token({"sub": str(db_user.id)})
     return {"access_token": token}
 

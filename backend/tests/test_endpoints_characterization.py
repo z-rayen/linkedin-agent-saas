@@ -49,12 +49,7 @@ def fake_search(monkeypatch: pytest.MonkeyPatch) -> None:
             return [{"title": "Free AWS ML course", "link": "https://example.com/cert", "summary": "cert"}]
         return [{"title": "NLP Engineer Job", "link": "https://example.com/job-1", "summary": "Remote job"}]
 
-    for target in [
-        "linkedin_agent.routers.watch.search_web",
-        "linkedin_agent.services.agent_service.search_web",
-        "linkedin_agent.services.engage_service.search_web",
-    ]:
-        monkeypatch.setattr(target, search)
+    monkeypatch.setattr("linkedin_agent.services.engage_service.search_web", search)
 
 
 # --- auth -------------------------------------------------------------------
@@ -155,29 +150,6 @@ def test_knowledge_is_isolated_between_users(client: TestClient, auth_headers: d
 # --- watch -------------------------------------------------------------------
 
 
-def test_watch_run_stores_scored_jobs_and_certs(
-    client: TestClient, auth_headers: dict, fake_llm: None, fake_search: None
-) -> None:
-    r = client.post("/watch/run", headers=auth_headers)
-    assert r.status_code == 200
-    assert r.json()["new_items"] >= 2
-
-    results = client.get("/watch/results", headers=auth_headers).json()
-    types = {item["type"] for item in results}
-    assert types == {"job", "cert"}
-    job = next(item for item in results if item["type"] == "job")
-    assert job["match_score"] == 90
-    assert job["cover_letter"].startswith("Dear hiring team")
-
-
-def test_watch_run_is_idempotent_for_known_links(
-    client: TestClient, auth_headers: dict, fake_llm: None, fake_search: None
-) -> None:
-    client.post("/watch/run", headers=auth_headers)
-    second = client.post("/watch/run", headers=auth_headers).json()
-    assert second["new_items"] == 0
-
-
 # --- content -----------------------------------------------------------------
 
 
@@ -214,37 +186,6 @@ def test_github_repos_without_connection_is_400(client: TestClient, auth_headers
 # --- agent -------------------------------------------------------------------
 
 
-def test_agent_ask_stores_history(client: TestClient, auth_headers: dict, fake_llm: None, fake_search: None) -> None:
-    r = client.post("/agent/ask", json={"request": "What is RAG?"}, headers=auth_headers)
-    assert r.status_code == 200
-    body = r.json()
-    assert body["intent"] == "search"
-    assert body["post_saved"] is False
-    assert body["sources"] and body["sources"][0]["link"].startswith("https://")
-
-    history = client.get("/agent/history", headers=auth_headers).json()
-    assert [m["role"] for m in history] == ["user", "assistant"]
-
-    assert client.delete("/agent/history", headers=auth_headers).json() == {"status": "cleared"}
-    assert client.get("/agent/history", headers=auth_headers).json() == []
-
-
-def test_agent_post_intent_saves_draft_to_queue(
-    client: TestClient, auth_headers: dict, fake_search: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def groq(prompt: str, **options: object) -> str:
-        if "planner" in prompt:
-            return json.dumps({"intent": "search_and_post", "queries": ["q"]})
-        return fake_groq(prompt)
-
-    monkeypatch.setattr(GROQ_COMPLETE, AsyncMock(side_effect=groq))
-
-    r = client.post("/agent/ask", json={"request": "Write a post about RAG"}, headers=auth_headers)
-    assert r.json()["post_saved"] is True
-    queue = client.get("/content/queue", headers=auth_headers).json()
-    assert queue[0]["source"] == "agent"
-
-
 # --- engage ------------------------------------------------------------------
 
 
@@ -259,33 +200,6 @@ def test_engage_suggest_returns_comment_per_post(
 
 
 # --- apply -------------------------------------------------------------------
-
-
-def test_apply_prepare_warns_when_knowledge_base_empty(
-    client: TestClient, auth_headers: dict, fake_llm: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with SessionLocal() as db:
-        user = db.query(models.User).filter(models.User.email == "alice@example.com").one()
-        job = models.WatchResult(user_id=user.id, type="job", title="ML Intern", link="https://example.com/job")
-        db.add(job)
-        db.commit()
-        job_id = job.id
-
-    monkeypatch.setattr(
-        "linkedin_agent.routers.apply.fetch_job_page",
-        AsyncMock(return_value=("<p>Apply: <a>jobs@acme.com</a></p>", "Job page text")),
-    )
-    r = client.post(f"/apply/prepare/{job_id}", headers=auth_headers)
-    assert r.status_code == 200
-    body = r.json()
-    assert body["recipient_email"] == "jobs@acme.com"
-    assert body["subject"] == "Application"
-    assert body["warning"] and "base de connaissances est vide" in body["warning"]
-
-
-def test_apply_prepare_unknown_offer_is_404(client: TestClient, auth_headers: dict) -> None:
-    r = client.post("/apply/prepare/999", headers=auth_headers)
-    assert r.status_code == 404
 
 
 # --- oauth (Phase 0 step 6: authenticated, signed, short-lived state) --------

@@ -160,9 +160,6 @@ export const en: typeof fr = {
     title: "Watch",
     intro:
       "Offers and certifications found for your profile. An offer can become an application: the preparation happens afterwards, with your review.",
-    run: "Run the watch",
-    running: "Watch in progress. This can take several minutes.",
-    ran: "Watch finished: {count} new result(s).",
     empty: "No result yet. Run the watch, or complete your profile.",
     typeJob: "Offer",
     typeCert: "Certification",
@@ -192,8 +189,17 @@ export const en: typeof fr = {
     reconnect: "Reconnect",
     redirecting: "Redirecting to the provider's site…",
     success: "{provider} is connected.",
-    noDisconnect:
-      "The application cannot revoke access yet. To revoke it, use the security settings of the provider.",
+    disconnect: "Disconnect",
+    disconnectConfirm:
+      "Disconnect {provider}? The token is deleted from the application: publishing and reading through this account stop.",
+    confirmDisconnect: "Yes, disconnect",
+    cancel: "Cancel",
+    disconnected: "{provider} is disconnected.",
+    revokedAtProvider: "Access was also revoked at {provider}.",
+    revokeNotSupported:
+      "{provider} does not let the application revoke access: do it in the security settings of {provider}.",
+    revokeFailed:
+      "Access could not be revoked at {provider}. Revoke it in the security settings of {provider}.",
   },
   content: {
     title: "Content",

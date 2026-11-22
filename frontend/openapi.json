@@ -14,19 +14,6 @@
         "title": "AccountDeletion",
         "type": "object"
       },
-      "AgentRequest": {
-        "properties": {
-          "request": {
-            "title": "Request",
-            "type": "string"
-          }
-        },
-        "required": [
-          "request"
-        ],
-        "title": "AgentRequest",
-        "type": "object"
-      },
       "ApplicationCreate": {
         "properties": {
           "company": {
@@ -722,99 +709,9 @@
         "summary": "Root"
       }
     },
-    "/agent/ask": {
-      "post": {
-        "operationId": "ask_agent_ask_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Ask",
-        "tags": [
-          "agent"
-        ]
-      }
-    },
-    "/agent/history": {
-      "delete": {
-        "operationId": "clear_history_agent_history_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Clear History",
-        "tags": [
-          "agent"
-        ]
-      },
-      "get": {
-        "operationId": "get_history_agent_history_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get History",
-        "tags": [
-          "agent"
-        ]
-      }
-    },
     "/agent/research": {
       "post": {
-        "description": "Accepts a question and returns 202 at once with a `run_id` and `status: queued`. The research (searches, page reads, reflection, a cited answer) runs in the background.\n\nFlow: 1) POST here. 2) Poll `GET /agent/research/{run_id}` until `status` is `done` (read `result`) or `failed` (read `error`). `result` holds the answer, the retrieval date, the `claims` with their sources and whether each rests on a full page (`fetched`) or a snippet, the cited `sources`, the `also_found` links, and the `unsupported` counts (statements removed, by reason).\n\nA 409 means the same request is already running. The run id is random and only its owner can read it; anyone else gets the same 404 as for an unknown id. `POST /agent/ask` is the earlier synchronous endpoint and is unchanged.",
+        "description": "Accepts a question and returns 202 at once with a `run_id` and `status: queued`. The research (searches, page reads, reflection, a cited answer) runs in the background.\n\nFlow: 1) POST here. 2) Poll `GET /agent/research/{run_id}` until `status` is `done` (read `result`) or `failed` (read `error`). `result` holds the answer, the retrieval date, the `claims` with their sources and whether each rests on a full page (`fetched`) or a snippet, the cited `sources`, the `also_found` links, and the `unsupported` counts (statements removed, by reason).\n\nA 409 means the same request is already running. The run id is random and only its owner can read it; anyone else gets the same 404 as for an unknown id. Nothing else answers a question synchronously.",
         "operationId": "start_research_agent_research_post",
         "requestBody": {
           "content": {
@@ -1462,51 +1359,6 @@
         ]
       }
     },
-    "/apply/prepare/{watch_result_id}": {
-      "post": {
-        "operationId": "prepare_apply_prepare__watch_result_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "watch_result_id",
-            "required": true,
-            "schema": {
-              "title": "Watch Result Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Prepare",
-        "tags": [
-          "apply"
-        ]
-      }
-    },
     "/auth/account": {
       "delete": {
         "description": "Removes the account, its profile, knowledge, runs, results, applications, messages, tokens and checkpoints.\nOther users' data is untouched. The removal is one transaction: it either happens completely or not at all.",
@@ -2085,6 +1937,62 @@
         ]
       }
     },
+    "/oauth/{provider}": {
+      "delete": {
+        "description": "Only the caller's own token is touched. The answer's `provider_revoked` says what happened at the provider:\n`revoked`, `not_supported` (LinkedIn: revoke it in the LinkedIn settings) or `failed` (revoke it by hand).",
+        "operationId": "disconnect_oauth__provider__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "enum": [
+                "linkedin",
+                "github"
+              ],
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Disconnect Oauth  Provider  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Disconnect a provider: deletes the stored token and revokes it at the provider when it can",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
     "/profile": {
       "get": {
         "operationId": "get_profile_profile_get",
@@ -2432,30 +2340,6 @@
           }
         ],
         "summary": "Get Results",
-        "tags": [
-          "watch"
-        ]
-      }
-    },
-    "/watch/run": {
-      "post": {
-        "operationId": "run_watch_watch_run_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Run Watch",
         "tags": [
           "watch"
         ]

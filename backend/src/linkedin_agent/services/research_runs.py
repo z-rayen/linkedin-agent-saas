@@ -151,7 +151,7 @@ async def _save_draft(user_id: int, title: str, text: str) -> int:
 
 
 def _remember(user_id: int, request: str, answer: str) -> None:
-    """The exchange joins the agent's conversation history, like the answers of POST /agent/ask."""
+    """The exchange joins the agent's conversation history, like the answers of earlier conversations."""
     with SessionLocal() as db:
         db.add(models.AgentMessage(user_id=user_id, role="user", content=request))
         db.add(models.AgentMessage(user_id=user_id, role="assistant", content=answer))
