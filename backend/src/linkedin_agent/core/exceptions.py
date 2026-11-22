@@ -63,7 +63,16 @@ class LLMOutputError(ExternalServiceError):
         super().__init__(message)
 
 
-CV_STRUCTURE_MESSAGE = "The model returned an invalid CV structure; retry or try another model"
+class LLMTruncatedError(LLMOutputError):
+    """The answer hit the output token limit before it finished. A budget problem, not a problem with the answer."""
+
+    code = "llm_truncated"
+
+    def __init__(self, max_tokens: int) -> None:
+        super().__init__(f"The model's answer was cut off at {max_tokens} tokens")
+
+
+CV_STRUCTURE_MESSAGE = "The model's answer was cut off or malformed; retry, or raise the output limit"
 
 
 class CVStructureError(LLMOutputError):

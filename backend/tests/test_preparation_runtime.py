@@ -49,7 +49,7 @@ def cv_answers(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
             return email
         return "unused"
 
-    async def complete(self: object, prompt: str) -> str:
+    async def complete(self: object, prompt: str, **options: object) -> str:
         return fake(prompt)
 
     monkeypatch.setattr(llm_module.GroqClient, "complete", complete)

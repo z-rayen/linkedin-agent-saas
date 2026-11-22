@@ -29,7 +29,7 @@ class FakeLLM:
         self._answer = answer
         self.prompts: list[str] = []
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(self, prompt: str, **options: object) -> str:
         self.prompts.append(prompt)
         return self._answer
 
@@ -89,7 +89,7 @@ def test_the_retry_with_the_problem_fed_back_recovers(monkeypatch: pytest.Monkey
     ]
 
     class _Sequence(FakeLLM):
-        async def complete(self, prompt: str) -> str:
+        async def complete(self, prompt: str, **options: object) -> str:
             self.prompts.append(prompt)
             return answers[len(self.prompts) - 1]
 

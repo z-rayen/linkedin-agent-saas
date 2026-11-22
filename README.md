@@ -121,6 +121,97 @@ then corrects it with the usage the provider reports. A call that does not fit w
 net: its `Retry-After` header is honoured, capped at 60 seconds. **The budget is per process**: run one API worker,
 or several workers would together exceed the provider limit.
 
+**Output limit and reasoning tokens.** The default model (`openai/gpt-oss-20b`) is a reasoning model: the tokens it
+spends thinking count against `LLM_MAX_OUTPUT_TOKENS`, together with the answer. When the cap runs out first, the
+answer is cut off and is not valid JSON. The log then shows `llm answer cut step=... max_tokens=...`.
+
+- A cut-off answer is **not** sent back with a "fix these problems" correction: the problem is the budget, not the
+  answer. The call is retried once with the cap multiplied by `LLM_OUTPUT_BUDGET_MULTIPLIER` (default 2), never above
+  `LLM_OUTPUT_TOKEN_CEILING` (default 4096). The retry uses one of the call's attempts (`retries`).
+- If the answer is still cut off at the ceiling, the run fails with: *"The model's answer was cut off or malformed;
+  retry, or raise the output limit."* Raise `LLM_OUTPUT_TOKEN_CEILING` or `LLM_MAX_OUTPUT_TOKENS`, or lower the reasoning
+  effort (below).
+- Each call reserves the estimated prompt tokens plus the cap from `LLM_TOKENS_PER_MINUTE`, then corrects the reservation
+  with the real usage. A larger cap therefore holds more of the minute's budget while the call is in flight, so calls
+  wait longer. The reservation of one call must fit the whole budget: the settings refuse a ceiling above
+  `LLM_TOKENS_PER_MINUTE`, and a call whose prompt plus cap cannot fit is refused at once, with a message that names the
+  variables to change, instead of waiting forever.
+
+**Reasoning effort and per-step models.** `LLM_REASONING_EFFORT` (`low`, `medium` or `high`) is sent to the provider
+when set; empty means not sent. Groq documents this parameter for `gpt-oss-20b`. Lower effort means fewer reasoning
+tokens for the same answer. `LLM_STEP_OVERRIDES` sets a model and an effort per step, as JSON keyed by step name:
+`cv_tailor` (the tailored CV), `analyze_job` (the job analysis), and `default` for every other call. An empty field
+uses the global value. Example:
+
+```
+LLM_STEP_OVERRIDES={"cv_tailor":{"reasoning_effort":"low"}}
+```
+
+Recommendation: before changing the model, first try `reasoning_effort=low` for `cv_tailor` and measure the result on your
+own master CV. The model is a validated choice (its answers are checked by the grounding rules), so a change of model
+needs the same measurement. A non-reasoning model removes reasoning tokens altogether, but its output quality must be
+checked the same way.
+
+## Research agent (LangGraph)
+
+A research run answers a question from the web, with numbered citations. The graph lives in
+`backend/src/linkedin_agent/graphs/research_graph.py`; its diagram is `docs/graphs/research_graph.md`.
+
+```
+plan -> search -> read -> reflect -> search        (reflection asks for more evidence, at most RESEARCH_MAX_LOOPS times)
+                                  -> synthesize -> draft_post -> end   (draft_post only when the request asks for a post)
+```
+
+- **plan** turns the request, the profile and the recent conversation into 1 to `RESEARCH_MAX_QUERIES` queries.
+- **search** runs the queries. Each round keeps only new links, up to `RESEARCH_MAX_SOURCES`.
+- **read** fetches at most `RESEARCH_MAX_PAGES` pages in full, each cut to `RESEARCH_PAGE_MAX_CHARS`, through
+  `safe_http` (public addresses only, size and content-type caps). A refused or unreachable page keeps its search
+  snippet: it never fails the run.
+- **reflect** judges whether the evidence is enough. If not, it proposes new queries, and the run searches again.
+  A round that finds no new link stops the loop: repeating a search cannot help.
+- **synthesize** writes the answer from the sources that fit in `RESEARCH_CONTEXT_MAX_CHARS`. Only those sources are
+  shown, and only their numbers may be cited. Every `[n]` is checked by code: a number that names no shown source is
+  removed and counted, never kept. The answer is written in the language of the request, not of the sources.
+- **draft_post** runs only when the request explicitly asks for a post. It saves a **draft** in the content queue.
+  Nothing is published by the graph: publishing is a separate, manual endpoint, and no path of the graph reaches it
+  (a test checks this).
+
+Search results and page text are untrusted data, wrapped in UNTRUSTED markers in every prompt. The graph never takes a
+query or a link from them: queries come from the planner and the reflection, and only links returned by the search
+are read.
+
+**Limits (all in settings, none hardcoded).**
+
+| Setting | Default | What it bounds |
+|---|---|---|
+| `RESEARCH_MAX_LOOPS` | 2 | refinements after the first search round (rounds in total: this + 1) |
+| `RESEARCH_MAX_QUERIES` | 3 | queries per plan or reflection |
+| `RESEARCH_RESULTS_PER_QUERY` | 5 | results kept per query |
+| `RESEARCH_MAX_SOURCES` | 8 | distinct links over the whole run |
+| `RESEARCH_MAX_PAGES` | 4 | pages fetched in full over the whole run |
+| `RESEARCH_PAGE_MAX_CHARS` | 1500 | characters kept per fetched page |
+| `RESEARCH_CONTEXT_MAX_CHARS` | 9000 | characters of sources in one prompt (about 3000 estimated tokens) |
+| `RESEARCH_STRUCTURED_RETRIES` | 1 | retries of the plan and reflection steps when their JSON does not validate |
+
+Per step, `LLM_STEP_OVERRIDES` can set a model and a reasoning effort for `research_plan`, `research_reflect`,
+`research_answer` and `research_post`, as for the other steps.
+
+**Cost, with the defaults.** A run makes at most **12 LLM calls** with a post (10 without): plan 2, reflection 6 (three
+rounds, each with one retry), answer 2 and post 2 (one cut-off retry each, see the output limit above). The count does
+not include the provider's HTTP 429 retries, which are bounded by `GROQ_MAX_RETRIES`. The number is computed from the
+settings by `worst_case_llm_calls()`, so it follows the configuration.
+
+**Duration, at 8000 tokens per minute (estimate, to be checked with the logs).** Much of the time is likely spent waiting
+for the token budget. A typical run (one search round, two pages, no retry) needs about 6000 to 8000 tokens: about one to
+two minutes. The worst case (three rounds, every answer cut off once, a post) needs roughly 25000 to 30000 tokens, so
+about four minutes of budget, plus provider latency and up to four page fetches of at most 20 seconds each: six to
+seven minutes. Each node logs its duration (`research node=... duration_ms=...`), which is the way to check these figures
+on your own data.
+
+**Not yet available: the HTTP endpoint.** Background runs need a table decision first, see
+`docs/adr/0002-research-run-table.md`. Until it is accepted, `POST /agent/ask` keeps its synchronous behaviour and its
+contract, unchanged.
+
 ## Sending email
 
 - **Dry-run is the default.** Nothing is sent. Each send runs every check, then stops.

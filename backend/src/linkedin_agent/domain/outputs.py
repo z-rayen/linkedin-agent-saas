@@ -35,6 +35,13 @@ class PlannerOutput(BaseModel):
         return UNKNOWN_INTENT_FALLBACK
 
 
+class ReflectOutput(BaseModel):
+    """Research agent reflection: is the evidence enough, and if not, which queries would fill the gaps."""
+
+    sufficient: bool = True
+    queries: list[str] = Field(default_factory=list, max_length=MAX_PLANNER_QUERIES)
+
+
 class ApplicationEmailOutput(BaseModel):
     """Subject and body of a job application email."""
 

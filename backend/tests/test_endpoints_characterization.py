@@ -20,7 +20,7 @@ from linkedin_agent.database import SessionLocal
 GROQ_COMPLETE = "linkedin_agent.infra.llm.GroqClient.complete"
 
 
-def fake_groq(prompt: str) -> str:
+def fake_groq(prompt: str, **options: object) -> str:
     """Route fake LLM answers by the kind of prompt that was sent."""
     if "cover letter" in prompt:
         return "Dear hiring team, this is a fake cover letter."
@@ -232,7 +232,7 @@ def test_agent_ask_stores_history(client: TestClient, auth_headers: dict, fake_l
 def test_agent_post_intent_saves_draft_to_queue(
     client: TestClient, auth_headers: dict, fake_search: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def groq(prompt: str) -> str:
+    def groq(prompt: str, **options: object) -> str:
         if "planner" in prompt:
             return json.dumps({"intent": "search_and_post", "queries": ["q"]})
         return fake_groq(prompt)

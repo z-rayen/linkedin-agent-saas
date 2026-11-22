@@ -6,13 +6,14 @@ usage the provider reports. A 429 response is a safety net: its Retry-After head
 """
 
 import logging
+import math
 from functools import cache, lru_cache
 from typing import Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from ..core.exceptions import LLMOutputError, LLMUnavailableError
+from ..core.exceptions import LLMOutputError, LLMTruncatedError, LLMUnavailableError
 from ..core.settings import Settings, get_settings
 from . import heartbeat
 from .rate_limit import Reservation, TokenBudget, estimate_prompt_tokens
@@ -20,12 +21,25 @@ from .rate_limit import Reservation, TokenBudget, estimate_prompt_tokens
 logger = logging.getLogger(__name__)
 ModelT = TypeVar("ModelT", bound=BaseModel)
 MAX_RETRY_AFTER_SECONDS = 60.0
+DEFAULT_STEP = "default"  # the step name of a call that has no entry in llm_step_overrides
 
 
 class LLMClient(Protocol):
-    """Anything that turns a prompt into text. Raises LLMUnavailableError when it cannot answer."""
+    """Anything that turns a prompt into text. Raises LLMUnavailableError when it cannot answer and
+    LLMTruncatedError when the answer hit max_tokens before it finished.
 
-    async def complete(self, prompt: str) -> str: ...
+    max_tokens caps the answer (reasoning tokens included). None means llm_max_output_tokens, model None means
+    groq_model. reasoning_effort is per call; an empty value is not sent, so the provider default applies.
+    """
+
+    async def complete(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        model: str | None = None,
+        reasoning_effort: str = "",
+    ) -> str: ...
 
 
 def _retry_after_seconds(response: httpx.Response, fallback: float) -> float:
@@ -51,9 +65,30 @@ class GroqClient:
         self._transport = transport
         self._budget = budget or get_token_budget()
 
-    async def complete(self, prompt: str) -> str:
+    async def complete(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        model: str | None = None,
+        reasoning_effort: str = "",
+    ) -> str:
         s = self._settings
-        estimate = estimate_prompt_tokens(prompt) + s.llm_max_output_tokens
+        cap = s.llm_max_output_tokens if max_tokens is None else max_tokens
+        estimate = estimate_prompt_tokens(prompt) + cap
+        if estimate > self._budget.capacity:
+            # Refused before any call: a call that can never fit the per-minute budget would wait forever.
+            raise LLMUnavailableError(
+                f"the prompt and the output limit need {estimate} tokens per minute, more than LLM_TOKENS_PER_MINUTE: "
+                "raise LLM_TOKENS_PER_MINUTE or lower LLM_OUTPUT_TOKEN_CEILING"
+            )
+        body: dict[str, object] = {
+            "model": s.groq_model if model is None else model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": cap,
+        }
+        if reasoning_effort:
+            body["reasoning_effort"] = reasoning_effort
         for attempt in range(s.groq_max_retries + 1):
             reservation: Reservation = await self._budget.reserve(estimate)
             await heartbeat.beat()  # the HTTP call below may take up to groq_timeout_seconds with no other sign of life
@@ -61,11 +96,7 @@ class GroqClient:
                 resp = await client.post(
                     s.groq_url,
                     headers={"Authorization": f"Bearer {s.groq_api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": s.groq_model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": s.llm_max_output_tokens,
-                    },
+                    json=body,
                     timeout=s.groq_timeout_seconds,
                 )
             try:
@@ -82,7 +113,7 @@ class GroqClient:
                 choice = data["choices"][0]
                 if choice.get("finish_reason") == "length":
                     # Reasoning tokens count against max_tokens too: a cut answer is not valid JSON.
-                    logger.warning("llm answer cut at max_tokens=%d", s.llm_max_output_tokens)
+                    raise LLMTruncatedError(cap)
                 content: str = choice["message"]["content"]
                 return content
 
@@ -169,24 +200,91 @@ def correction_for(problems: list[str]) -> str:
     )
 
 
-async def complete_structured(prompt: str, model: type[ModelT], retries: int = 1) -> ModelT:
-    """Ask for JSON, validate it against `model`, and retry up to `retries` times if it does not validate.
+def resolve_step(step: str, settings: Settings) -> tuple[str, str]:
+    """The model and the reasoning effort of one step. A step's override wins; an empty value means the global one."""
+    override = settings.llm_step_overrides.get(step)
+    model = (override.model if override else "") or settings.groq_model
+    effort = (override.reasoning_effort if override else "") or settings.llm_reasoning_effort
+    return model, effort
 
-    Each retry sends the validation problems back to the model (field paths and error types, not content), so the
-    model can correct itself instead of repeating the same answer.
 
-    Raises LLMUnavailableError if the provider fails, LLMOutputError if no attempt validates.
+async def complete_structured(prompt: str, model: type[ModelT], retries: int = 1, step: str = DEFAULT_STEP) -> ModelT:
+    """Ask for JSON, validate it against `model`, and retry up to `retries` times when an attempt fails.
+
+    Two kinds of failure are retried differently. A rejected answer is retried with the validation problems sent
+    back (field paths and error types, not content), so the model can correct itself. An answer cut off at max_tokens
+    is retried with a larger cap, up to llm_output_token_ceiling, and no correction: the problem is the budget.
+    Every attempt, retries included, counts against `retries`.
+
+    Raises LLMUnavailableError if the provider fails, LLMTruncatedError if the cap is still too small at the ceiling,
+    LLMOutputError if no attempt validates.
     """
+    settings = get_settings()
     client = get_llm_client()
+    llm_model, effort = resolve_step(step, settings)
+    cap = settings.llm_max_output_tokens
     attempt_prompt = prompt
     for attempt in range(1, retries + 2):
-        text = await client.complete(attempt_prompt)
+        try:
+            text = await client.complete(attempt_prompt, max_tokens=cap, model=llm_model, reasoning_effort=effort)
+        except LLMTruncatedError:
+            if cap >= settings.llm_output_token_ceiling or attempt > retries:
+                logger.warning("llm answer cut step=%s attempt=%d max_tokens=%d, no retry left", step, attempt, cap)
+                raise
+            larger = min(settings.llm_output_token_ceiling, math.ceil(cap * settings.llm_output_budget_multiplier))
+            logger.warning(
+                "llm answer cut step=%s attempt=%d max_tokens=%d, retrying with max_tokens=%d",
+                step,
+                attempt,
+                cap,
+                larger,
+            )
+            cap = larger
+            continue
         try:
             return model.model_validate_json(_strip_code_fence(text))
         except ValidationError as exc:
             problems = describe_validation_errors(exc, model)
             logger.warning(
-                "llm output rejected model=%s attempt=%d problems=%s", model.__name__, attempt, "; ".join(problems)
+                "llm output rejected model=%s step=%s attempt=%d problems=%s",
+                model.__name__,
+                step,
+                attempt,
+                "; ".join(problems),
             )
             attempt_prompt = prompt + correction_for(problems)
     raise LLMOutputError()
+
+
+def output_budgets(settings: Settings) -> list[int]:
+    """The output caps one call may use, in order: the default cap, then each escalation up to the ceiling.
+
+    The list is the worst case of a call: each truncated answer moves to the next cap, and that is one attempt.
+    """
+    caps = [settings.llm_max_output_tokens]
+    while caps[-1] < settings.llm_output_token_ceiling:
+        larger = math.ceil(caps[-1] * settings.llm_output_budget_multiplier)
+        caps.append(min(settings.llm_output_token_ceiling, larger))
+    return caps
+
+
+async def complete_text(prompt: str, step: str = DEFAULT_STEP) -> str:
+    """A free-text answer. A cut-off answer is retried on the next cap; nothing is validated.
+
+    Raises LLMUnavailableError if the provider fails, LLMTruncatedError if the ceiling is still too small.
+    """
+    settings = get_settings()
+    client = get_llm_client()
+    model, effort = resolve_step(step, settings)
+    caps = output_budgets(settings)
+    for index, cap in enumerate(caps):
+        try:
+            return await client.complete(prompt, max_tokens=cap, model=model, reasoning_effort=effort)
+        except LLMTruncatedError:
+            if index == len(caps) - 1:
+                logger.warning("llm answer cut step=%s max_tokens=%d, no retry left", step, cap)
+                raise
+            logger.warning(
+                "llm answer cut step=%s max_tokens=%d, retrying with max_tokens=%d", step, cap, caps[index + 1]
+            )
+    raise LLMOutputError()  # unreachable: the loop returns or raises on its last cap

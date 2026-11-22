@@ -13,8 +13,17 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ReasoningEffort = Literal["", "low", "medium", "high"]  # "" means: not sent, the provider default applies
+
+
+class LLMStepOverride(BaseModel):
+    """The model and reasoning effort of one LLM step. An empty field means: the global setting."""
+
+    model: str = ""
+    reasoning_effort: ReasoningEffort = ""
 
 
 class Settings(BaseSettings):
@@ -51,8 +60,18 @@ class Settings(BaseSettings):
     llm_min_interval_seconds: float = 2.0
     # Shared token budget per process (Groq free tier is about 8000 tokens per minute). Per process, not per cluster.
     llm_tokens_per_minute: int = 8000
-    # Reserved for each completion, and the cap sent to the provider. The reservation is corrected with real usage.
-    llm_max_output_tokens: int = 1024
+    # Output cap sent to the provider, and reserved with the prompt before each call. Reasoning tokens count against
+    # it: a reasoning model can spend most of it before the answer starts. The reservation is corrected with real usage.
+    llm_max_output_tokens: int = Field(default=2048, gt=0)
+    # A call whose answer was cut off (finish_reason=length) is retried with the cap multiplied by this factor...
+    llm_output_budget_multiplier: float = Field(default=2.0, gt=1)
+    # ...but never above this hard ceiling. Keep ceiling + longest prompt within llm_tokens_per_minute.
+    llm_output_token_ceiling: int = Field(default=4096, gt=0)
+    # Reasoning effort of the reasoning model: "low", "medium" or "high". Empty: the provider default, not sent.
+    llm_reasoning_effort: ReasoningEffort = ""
+    # Per-step overrides, JSON in the environment, e.g. {"cv_tailor": {"reasoning_effort": "low"}}.
+    # A step without an entry uses groq_model and llm_reasoning_effort.
+    llm_step_overrides: dict[str, LLMStepOverride] = Field(default_factory=dict)
     # Grounding revisions per preparation: the graph feeds the exact problems back this many times at most.
     graph_max_revisions: int = 2
     # A running job beats (proof of life) at every graph node, HTTP call and budget wait. A beat is never
@@ -75,6 +94,19 @@ class Settings(BaseSettings):
     fastembed_cache_dir: str = "data/models/fastembed"
     # Load the embedding model at API startup, so the first request does not wait for the download.
     embedding_warm_on_startup: bool = True
+
+    # Research agent graph (graphs/research_graph.py). Every limit that bounds its cost or its reading.
+    # How many times reflection may send the run back to search. Search rounds in total: this value + 1.
+    research_max_loops: int = Field(default=2, ge=0)
+    research_max_queries: int = Field(default=3, ge=1)  # queries per planning or reflection step
+    research_results_per_query: int = Field(default=5, ge=1)
+    research_max_sources: int = Field(default=8, ge=1)  # distinct links kept over the whole run
+    research_max_pages: int = Field(default=4, ge=0)  # pages fetched in full over the whole run (the rest: snippets)
+    research_page_max_chars: int = Field(default=1500, ge=200)  # characters kept per fetched page
+    # Characters of sources that may go into one prompt. About a third of this is the estimated token count.
+    research_context_max_chars: int = Field(default=9000, ge=1000)
+    # Retries of each structured step (plan, reflection) when its answer does not validate.
+    research_structured_retries: int = Field(default=1, ge=0)
 
     # Default profile, used until the user saves their own.
     default_field: str = "Machine Learning, Data Science"
@@ -157,6 +189,15 @@ class Settings(BaseSettings):
     tectonic_required: bool = True
     # Personal files (real master CV, generated PDFs). Gitignored: never commit this folder.
     private_data_dir: str = "data/private"
+
+    @model_validator(mode="after")
+    def output_budget_is_coherent(self) -> "Settings":
+        """The ceiling must allow the default cap, and one call's reservation must fit the per-minute budget."""
+        if self.llm_output_token_ceiling < self.llm_max_output_tokens:
+            raise ValueError("LLM_OUTPUT_TOKEN_CEILING must be at least LLM_MAX_OUTPUT_TOKENS")
+        if self.llm_output_token_ceiling > self.llm_tokens_per_minute:
+            raise ValueError("LLM_OUTPUT_TOKEN_CEILING must not exceed LLM_TOKENS_PER_MINUTE: one call could never fit")
+        return self
 
     @model_validator(mode="after")
     def real_sending_needs_a_target(self) -> "Settings":

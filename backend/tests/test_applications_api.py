@@ -62,7 +62,7 @@ def cv_answer(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | dict]:
             return json.dumps(EMAIL)
         return "unused"
 
-    monkeypatch.setattr(llm_module.GroqClient, "complete", lambda self, prompt: _async(fake(prompt)))
+    monkeypatch.setattr(llm_module.GroqClient, "complete", lambda self, prompt, **options: _async(fake(prompt)))
     return state
 
 

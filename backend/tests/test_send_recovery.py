@@ -60,7 +60,7 @@ def answers(monkeypatch: pytest.MonkeyPatch) -> None:
             return json.dumps(EMAIL)
         return "unused"
 
-    async def complete(self: object, prompt: str) -> str:
+    async def complete(self: object, prompt: str, **options: object) -> str:
         return fake(prompt)
 
     monkeypatch.setattr(llm_module.GroqClient, "complete", complete)

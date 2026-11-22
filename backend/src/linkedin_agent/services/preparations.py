@@ -170,7 +170,7 @@ def _deps(db: Session, run_id: int, user_id: int, profile: dict[str, str], setti
 
     async def analyze(job_title: str, job_text: str) -> JobAnalysis:
         prompt = render("analyze_job.v1", job_title=job_title, job_text=job_text)
-        return await complete_structured(prompt, JobAnalysis)
+        return await complete_structured(prompt, JobAnalysis, step="analyze_job")
 
     async def research(company: str) -> list[dict[str, str]]:
         results = await search_web(f"{company} company", num_results=RESEARCH_RESULTS)

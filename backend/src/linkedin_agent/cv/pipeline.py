@@ -33,7 +33,7 @@ async def tailor_cv(job_title: str, job_text: str, master: MasterCV, feedback: s
         feedback=feedback,
     )
     try:
-        cv = await complete_structured(prompt, TailoredCV, retries=1)
+        cv = await complete_structured(prompt, TailoredCV, retries=1, step="cv_tailor")
     except LLMOutputError as exc:
         # The user sees this message in the run status. The validation details are in the log, not here.
         raise CVStructureError() from exc

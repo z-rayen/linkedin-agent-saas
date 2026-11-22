@@ -49,7 +49,7 @@ class Script:
 
 def run_complete(script: Script, max_retries: int = 2) -> str:
     client = GroqClient(make_settings(max_retries), transport=httpx.MockTransport(script))
-    return asyncio.run(client.complete("prompt"))
+    return asyncio.run(client.complete("prompt", max_tokens=1024, model="test-model"))
 
 
 def test_rate_limit_is_retried_then_succeeds() -> None:
