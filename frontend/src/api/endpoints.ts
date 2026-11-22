@@ -13,6 +13,14 @@ import type {
   StoredMasterCv,
   StreamTicket,
   TokenResponse,
+  ProfileConfig,
+  KnowledgeItem,
+  WatchResult,
+  Connection,
+  Provider,
+  ContentItem,
+  ResearchRun,
+  ResearchStart,
 } from "./types";
 
 const applicationPath = (id: number): string => `/applications/${String(id)}`;
@@ -88,4 +96,56 @@ export const endpoints = {
   /** The send mode, from the server's configuration. An error means "unknown": callers must never treat it as "dry run". */
   mailMode: (signal?: AbortSignal) =>
     apiRequest<MailModeResponse>("/applications/mail-mode", signal ? { signal } : {}),
+  startResearch: (body: { request: string; draft_post: boolean }) =>
+    apiRequest<ResearchStart>("/agent/research", { method: "POST", body }),
+
+  getResearch: (runId: string, signal?: AbortSignal) =>
+    apiRequest<ResearchRun>(
+      `/agent/research/${encodeURIComponent(runId)}`,
+      signal ? { signal } : {},
+    ),
+
+  getProfile: (signal?: AbortSignal) =>
+    apiRequest<ProfileConfig>("/profile", signal ? { signal } : {}),
+
+  saveProfile: (body: ProfileConfig) =>
+    apiRequest<ProfileConfig>("/profile", { method: "POST", body }),
+
+  listKnowledge: (signal?: AbortSignal) =>
+    apiRequest<KnowledgeItem[]>("/profile/knowledge", signal ? { signal } : {}),
+
+  addKnowledge: (content: string) =>
+    apiRequest<KnowledgeItem>("/profile/knowledge", { method: "POST", body: { content } }),
+
+  deleteKnowledge: (id: number) =>
+    apiRequest<{ status: string }>(`/profile/knowledge/${String(id)}`, { method: "DELETE" }),
+
+  watchResults: (signal?: AbortSignal) =>
+    apiRequest<WatchResult[]>("/watch/results", signal ? { signal } : {}),
+
+  runWatch: () =>
+    apiRequest<{ new_items: number; titles: string[] }>("/watch/run", { method: "POST" }),
+
+  connections: (signal?: AbortSignal) =>
+    apiRequest<Connection[]>("/oauth/connections", signal ? { signal } : {}),
+
+  /** The provider's consent page. The browser is sent there; the server answers with the page to go to. */
+  authorizeUrl: (provider: Provider) =>
+    apiRequest<{ url: string }>(`/oauth/${provider}/authorize-url`),
+
+  contentQueue: (signal?: AbortSignal) =>
+    apiRequest<ContentItem[]>("/content/queue", signal ? { signal } : {}),
+
+  generateContent: (body: { title: string; context: string; source: string }) =>
+    apiRequest<ContentItem>("/content/generate", { method: "POST", body }),
+
+  editContent: (id: number, body: { title?: string; post_text?: string }) =>
+    apiRequest<ContentItem>(`/content/${String(id)}`, { method: "PATCH", body }),
+
+  publishContent: (id: number) =>
+    apiRequest<{ status: string }>(`/content/${String(id)}/publish`, { method: "POST" }),
+
+  /** Deletes the account and everything that belongs to it. The password is typed again: a stray call cannot do it. */
+  deleteAccount: (password: string) =>
+    apiRequest<{ status: string }>("/auth/account", { method: "DELETE", body: { password } }),
 } as const;

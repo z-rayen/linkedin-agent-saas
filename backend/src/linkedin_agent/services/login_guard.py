@@ -1,52 +1,64 @@
-"""Limits failed logins per account and per client address.
+"""Slows down failed logins per account and per client address, instead of locking them out.
 
-A failed attempt is counted under two keys: the normalised email (account) and the client address. When either key has
-reached `login_max_failures` inside `login_window_seconds`, every login is refused with 429 until the oldest failure
-leaves the window, even with the right password. A successful login clears the account's failures.
+The first `login_free_failures` failures are free. After that, the wait before the next attempt doubles with each
+failure (`login_base_delay_seconds`: 2 s, 4 s, 8 s ...), capped at `login_max_delay_seconds`. An attempt made before the
+wait is over is refused with 429 and `retry_after_seconds`, even with the right password. A success clears the
+account's count; a quiet period of `login_forget_seconds` without failure forgets the count of either key. See
+docs/adr/0004-login-delay-and-trusted-proxies.md for the reasons and the trade-offs.
 
-The state is in memory, per process. With several API workers each process counts on its own, so the effective limit is
-a multiple of the configured one until a shared store is added (the same trade-off as the stream tickets, ADR 0003).
+The state is in memory, per process: with several API workers each process counts on its own.
 """
 
 import math
 import threading
 import time
-from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from ..core.exceptions import RateLimitedError
 from ..core.settings import Settings, get_settings
 
 ACCOUNT_KEY = "account:"
 ADDRESS_KEY = "address:"
+MAX_EXPONENT = 32
+
+
+@dataclass
+class _Failures:
+    count: int
+    last_at: float
 
 
 class LoginGuard:
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._lock = threading.Lock()
-        self._failures: dict[str, deque[float]] = {}
+        self._failures: dict[str, _Failures] = {}
 
     def check(self, account: str, address: str) -> None:
-        """Raises RateLimitedError when either the account or the address is blocked."""
+        """Raises RateLimitedError when either the account or the address has to wait."""
         settings = get_settings()
         now = self._clock()
         with self._lock:
-            waits = [
-                self._seconds_until_allowed(ACCOUNT_KEY + account, now, settings),
-                self._seconds_until_allowed(ADDRESS_KEY + address, now, settings),
-            ]
-        longest = max(waits)
-        if longest > 0:
-            raise RateLimitedError(math.ceil(longest))
+            wait = max(
+                self._seconds_to_wait(ACCOUNT_KEY + account, now, settings),
+                self._seconds_to_wait(ADDRESS_KEY + address, now, settings),
+            )
+        if wait > 0:
+            raise RateLimitedError(math.ceil(wait))
 
     def record_failure(self, account: str, address: str) -> None:
         settings = get_settings()
         now = self._clock()
         with self._lock:
-            self._sweep(now, settings)
+            self._forget_quiet_keys(now, settings)
             for key in (ACCOUNT_KEY + account, ADDRESS_KEY + address):
-                self._failures.setdefault(key, deque()).append(now)
+                entry = self._failures.get(key)
+                if entry is None:
+                    self._failures[key] = _Failures(count=1, last_at=now)
+                else:
+                    entry.count += 1
+                    entry.last_at = now
 
     def record_success(self, account: str) -> None:
         with self._lock:
@@ -57,33 +69,28 @@ class LoginGuard:
         with self._lock:
             self._failures.clear()
 
-    def _seconds_until_allowed(self, key: str, now: float, settings: Settings) -> float:
-        """0 when the key may try again; otherwise the time until enough failures have left the window."""
-        window = settings.login_window_seconds
-        failures = self._failures.get(key)
-        if failures is None:
+    def _seconds_to_wait(self, key: str, now: float, settings: Settings) -> float:
+        entry = self._failures.get(key)
+        if entry is None:
             return 0.0
-        _expire(failures, now, window)
-        if not failures:
+        if now - entry.last_at >= settings.login_forget_seconds:
             del self._failures[key]
             return 0.0
-        blocking_index = len(failures) - settings.login_max_failures
-        if blocking_index < 0:
-            return 0.0
-        return failures[blocking_index] + window - now
+        return max(0.0, entry.last_at + delay_after(entry.count, settings) - now)
 
-    def _sweep(self, now: float, settings: Settings) -> None:
-        """Drops the keys whose failures have all left the window, so memory does not grow without bound."""
-        for key in list(self._failures):
-            failures = self._failures[key]
-            _expire(failures, now, settings.login_window_seconds)
-            if not failures:
-                del self._failures[key]
+    def _forget_quiet_keys(self, now: float, settings: Settings) -> None:
+        quiet = [key for key, entry in self._failures.items() if now - entry.last_at >= settings.login_forget_seconds]
+        for key in quiet:
+            del self._failures[key]
 
 
-def _expire(failures: deque[float], now: float, window: float) -> None:
-    while failures and now - failures[0] >= window:
-        failures.popleft()
+def delay_after(count: int, settings: Settings) -> float:
+    """Seconds to wait after `count` consecutive failures. Zero while the failures are still free."""
+    extra = count - settings.login_free_failures
+    if extra < 0:
+        return 0.0
+    exponent = min(extra, MAX_EXPONENT)  # the cap is reached long before: this only keeps the arithmetic finite
+    return min(settings.login_base_delay_seconds * 2**exponent, settings.login_max_delay_seconds)
 
 
 LOGIN_GUARD = LoginGuard()

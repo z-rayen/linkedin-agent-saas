@@ -1,12 +1,19 @@
 import httpx
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..auth_utils import get_current_user
 from ..clock import utcnow
 from ..core.crypto import decrypt_secret
-from ..core.exceptions import ExternalServiceError, NotConnectedError, NotFoundError, http_error
+from ..core.exceptions import (
+    ExternalServiceError,
+    InvalidStateError,
+    NotConnectedError,
+    NotFoundError,
+    http_error,
+)
 from ..database import get_db
 from ..services.groq_service import generate_post
 
@@ -68,17 +75,53 @@ def get_queue(db: Session = Depends(get_db), current_user: models.User = Depends
     )
 
 
-@router.post("/{content_id}/publish")
-async def publish(
-    content_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
-):
+LINKEDIN_POST_MAX_CHARS = 3000
+CONTENT_TITLE_MAX_CHARS = 200
+
+
+class ContentEdit(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=CONTENT_TITLE_MAX_CHARS)
+    post_text: str | None = Field(default=None, min_length=1, max_length=LINKEDIN_POST_MAX_CHARS)
+
+
+def _owned_content(db: Session, user_id: int, content_id: int) -> models.ContentQueue:
     item = (
         db.query(models.ContentQueue)
-        .filter(models.ContentQueue.id == content_id, models.ContentQueue.user_id == current_user.id)
+        .filter(models.ContentQueue.id == content_id, models.ContentQueue.user_id == user_id)
         .first()
     )
     if not item:
         raise http_error(NotFoundError("Post not found"))
+    return item
+
+
+@router.patch("/{content_id}", response_model=schemas.ContentOut)
+def edit_content(
+    content_id: int,
+    payload: ContentEdit,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Edits the title or the text of a post. A published post is history and cannot change."""
+    item = _owned_content(db, current_user.id, content_id)
+    if item.status == "published":
+        raise http_error(InvalidStateError("A published post cannot be edited"))
+    if payload.title is not None:
+        item.title = payload.title
+    if payload.post_text is not None:
+        item.post_text = payload.post_text
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/{content_id}/publish")
+async def publish(
+    content_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+):
+    item = _owned_content(db, current_user.id, content_id)
+    if item.status == "published":
+        raise http_error(InvalidStateError("This post is already published"))
 
     access_token = _provider_token(db, current_user.id, "linkedin", "LinkedIn")
     auth_headers = {"Authorization": f"Bearer {access_token}"}

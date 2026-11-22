@@ -4,7 +4,8 @@ import type { Problem } from "./errors";
 export type ApplicationStatus =
   "prepared" | "approved" | "sending" | "needs_verification" | "sent" | "failed" | "replied";
 
-export type RunStatus = "queued" | "running" | "awaiting_review" | "closed" | "failed";
+/** Preparations end in awaiting_review, closed or failed; research runs end in done or failed. */
+export type RunStatus = "queued" | "running" | "awaiting_review" | "closed" | "failed" | "done";
 
 export interface TokenResponse {
   readonly access_token: string;
@@ -103,6 +104,102 @@ export interface StreamTicket {
   readonly ticket: string;
   readonly expires_in: number;
   readonly events: string;
+}
+
+/** Research: the basis of a statement. "fetched" = the full page was read; "snippet" = only the search snippet. */
+export type ClaimBasis = "fetched" | "snippet" | "none";
+
+export interface ResearchClaim {
+  readonly text: string;
+  readonly sources: readonly number[];
+  readonly basis: ClaimBasis;
+}
+
+export interface ResearchSource {
+  readonly number: number;
+  readonly title: string;
+  readonly link: string;
+  readonly fetched: boolean;
+}
+
+/** A link the research retrieved but did not cite: no number, since the answer does not refer to it. */
+export interface ResearchLink {
+  readonly title: string;
+  readonly link: string;
+  readonly fetched: boolean;
+}
+
+export interface ResearchResult {
+  readonly answer: string;
+  readonly retrieved_at: string;
+  readonly language: string;
+  readonly claims: readonly ResearchClaim[];
+  readonly sources: readonly ResearchSource[];
+  readonly also_found: readonly ResearchLink[];
+  /** Statements removed by the checks, counted by reason. */
+  readonly unsupported: Readonly<Record<string, number>>;
+  readonly off_topic: number;
+  readonly post_id: number | null;
+}
+
+export type ResearchStatus = "queued" | "running" | "done" | "failed";
+
+export interface ResearchRun {
+  readonly run_id: string;
+  readonly status: ResearchStatus;
+  readonly step: string | null;
+  readonly error: string | null;
+  readonly stalled: boolean;
+  readonly result: ResearchResult | null;
+}
+
+export interface ResearchStart {
+  readonly run_id: string;
+  readonly status: ResearchStatus;
+}
+
+export interface ProfileConfig {
+  readonly field: string;
+  readonly skills: string;
+  readonly level: string;
+  readonly min_match_score: number;
+  readonly job_feed_url: string | null;
+  readonly cert_feed_url: string | null;
+}
+
+export interface KnowledgeItem {
+  readonly id: number;
+  readonly content: string;
+}
+
+export interface WatchResult {
+  readonly id: number;
+  readonly type: "job" | "cert" | "other";
+  readonly title: string;
+  readonly link: string;
+  readonly match_score: number;
+  readonly justification: string | null;
+  readonly cover_letter: string | null;
+}
+
+export type ConnectionStatus = "connected" | "expired" | "not_connected";
+export type Provider = "linkedin" | "github";
+
+export interface Connection {
+  readonly provider: Provider;
+  readonly status: ConnectionStatus;
+  readonly expires_at: string | null;
+}
+
+export type ContentStatus = "draft" | "approved" | "published" | "error";
+
+export interface ContentItem {
+  readonly id: number;
+  readonly title: string;
+  readonly post_text: string;
+  readonly status: ContentStatus;
+  readonly source: string;
+  readonly created_at: string;
 }
 
 /** A progress snapshot of a run, as the stream sends it: status and step only. */

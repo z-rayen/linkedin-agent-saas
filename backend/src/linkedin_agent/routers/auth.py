@@ -8,10 +8,10 @@ from ..core.exceptions import PasswordTooLongError, PasswordTooShortError
 from ..core.settings import get_settings
 from ..database import get_db
 from ..services import retention
+from ..services.client_address import client_address
 from ..services.login_guard import LOGIN_GUARD
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-UNKNOWN_ADDRESS = "unknown"
 
 
 def _check_password_policy(password: str) -> None:
@@ -47,7 +47,11 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=schemas.Token)
 def login(user: schemas.UserCreate, request: Request, db: Session = Depends(get_db)):
     # The email is already normalised by the schema, so the account key is the same for every spelling of it.
-    address = request.client.host if request.client else UNKNOWN_ADDRESS
+    address = client_address(
+        request.client.host if request.client else None,
+        request.headers.get("x-forwarded-for"),
+        get_settings().trusted_proxies,
+    )
     LOGIN_GUARD.check(user.email, address)
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if not db_user or not auth_utils.verify_password(user.password, db_user.hashed_password):
@@ -71,7 +75,8 @@ def delete_account(
 ):
     """Removes the account, its profile, knowledge, runs, results, applications, messages, tokens and checkpoints.
     Other users' data is untouched. The removal is one transaction: it either happens completely or not at all."""
+    # 403, not 401: a 401 on an authenticated call means the session ended, and the screen would log the user out.
     if not auth_utils.verify_password(payload.password, current_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=403, detail="The password is incorrect; nothing was deleted.")
     removed = retention.delete_user_data(db, current_user.id)
     return {"status": "deleted", "removed": removed}

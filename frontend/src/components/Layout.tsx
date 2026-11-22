@@ -25,6 +25,12 @@ export function Layout() {
             </NavLink>
             <NavLink to="/applications/new">{t("nav.newApplication")}</NavLink>
             <NavLink to="/master-cv">{t("nav.masterCv")}</NavLink>
+            <NavLink to="/research">{t("nav.research")}</NavLink>
+            <NavLink to="/watch">{t("nav.watch")}</NavLink>
+            <NavLink to="/content">{t("nav.content")}</NavLink>
+            <NavLink to="/profile">{t("nav.profile")}</NavLink>
+            <NavLink to="/connections">{t("nav.connections")}</NavLink>
+            <NavLink to="/account">{t("nav.account")}</NavLink>
           </nav>
           <div className={styles.tools}>
             <LocaleSwitch />

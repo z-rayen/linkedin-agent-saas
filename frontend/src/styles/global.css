@@ -344,3 +344,7 @@ a {
     flex-direction: column;
   }
 }
+
+.pre-wrap {
+  white-space: pre-wrap;
+}

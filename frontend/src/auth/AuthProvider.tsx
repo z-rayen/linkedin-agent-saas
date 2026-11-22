@@ -3,7 +3,7 @@ import { configureClient } from "../api/client";
 import { clearToken, readToken, writeToken } from "./tokenStorage";
 import { isExpired } from "./jwt";
 
-export type SessionEndReason = "expired" | "invalid" | "logout";
+export type SessionEndReason = "expired" | "invalid" | "logout" | "deleted";
 
 interface Session {
   readonly token: string | null;

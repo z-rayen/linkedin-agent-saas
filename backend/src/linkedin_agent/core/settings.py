@@ -6,6 +6,7 @@ start without them. Non-secret tuning values have defaults, so they can be
 overridden per deployment without touching code.
 """
 
+import ipaddress
 import os
 from collections.abc import Mapping
 from functools import lru_cache
@@ -161,9 +162,15 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
     # Registration policy: a minimum length (NIST-style: length over composition). The maximum is bcrypt's byte limit.
     password_min_length: int = Field(default=12, ge=8, le=128)
-    # Failed logins allowed per account and per client address within the window, then refused until it passes.
-    login_max_failures: int = Field(default=5, ge=1)
-    login_window_seconds: float = Field(default=900.0, gt=0)
+    # Failed logins: the first ones are free. After that the wait before the next attempt doubles with each failure,
+    # up to a cap. A quiet period with no failure forgets the count. See docs/adr/0004 for the reasons.
+    login_free_failures: int = Field(default=3, ge=1)
+    login_base_delay_seconds: float = Field(default=2.0, gt=0)
+    login_max_delay_seconds: float = Field(default=900.0, gt=0)
+    login_forget_seconds: float = Field(default=3600.0, gt=0)
+    # Reverse proxies whose X-Forwarded-For is believed, as a comma-separated list of IPs or CIDR networks. Empty means
+    # the connection's own address is always used. Only list proxies you control: the header is spoofable otherwise.
+    trusted_proxies: str = ""
     access_token_expire_minutes: int = 60 * 24 * 7
     oauth_state_expire_minutes: int = 10
 
@@ -375,6 +382,20 @@ class Settings(BaseSettings):
                 "or MAIL_ALLOW_REAL_RECIPIENTS=true (explicit opt-in to real recipients)"
             )
         return self
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _check_trusted_proxies(cls, value: str) -> str:
+        """Every entry must be an IP address or a network: a typo must fail at startup, not silently trust nothing."""
+        for entry in value.split(","):
+            if entry.strip():
+                try:
+                    ipaddress.ip_network(entry.strip(), strict=False)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"TRUSTED_PROXIES entry is not an IP address or network: {entry.strip()!r}"
+                    ) from exc
+        return value
 
     @field_validator("frontend_origin")
     @classmethod

@@ -40,6 +40,7 @@ const RUN_STATUSES: readonly RunStatus[] = [
   "awaiting_review",
   "closed",
   "failed",
+  "done",
 ];
 const NOT_FOUND = "not_found";
 

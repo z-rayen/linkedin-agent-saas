@@ -195,6 +195,38 @@
         "title": "ContentCreate",
         "type": "object"
       },
+      "ContentEdit": {
+        "properties": {
+          "post_text": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Text"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "ContentEdit",
+        "type": "object"
+      },
       "ContentOut": {
         "properties": {
           "created_at": {
@@ -1727,6 +1759,64 @@
         ]
       }
     },
+    "/content/{content_id}": {
+      "patch": {
+        "description": "Edits the title or the text of a post. A published post is history and cannot change.",
+        "operationId": "edit_content_content__content_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContentEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Edit Content",
+        "tags": [
+          "content"
+        ]
+      }
+    },
     "/content/{content_id}/publish": {
       "post": {
         "operationId": "publish_content__content_id__publish_post",
@@ -1813,6 +1903,37 @@
         "summary": "Suggest",
         "tags": [
           "engage"
+        ]
+      }
+    },
+    "/oauth/connections": {
+      "get": {
+        "operationId": "connections_oauth_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Connections Oauth Connections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connection state of each provider: connected, expired or not_connected",
+        "tags": [
+          "oauth"
         ]
       }
     },

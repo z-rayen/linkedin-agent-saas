@@ -20,7 +20,7 @@ function classes(...names: Array<string | undefined>): string {
 }
 const UNAUTHORIZED = 401;
 const CONFLICT = 409;
-const SESSION_REASONS: readonly SessionEndReason[] = ["expired", "invalid", "logout"];
+const SESSION_REASONS: readonly SessionEndReason[] = ["expired", "invalid", "logout", "deleted"];
 
 export interface AuthRouteState {
   readonly from?: string;
@@ -43,6 +43,23 @@ export function readAuthState(value: unknown): AuthRouteState {
   if (reason !== undefined) state.endReason = reason;
   if (record.registered === true) state.registered = true;
   return state;
+}
+
+/** Why the user is on the login page, when a session ended on its own. A logout needs no message. */
+export function sessionMessageFor(
+  reason: SessionEndReason | undefined,
+  t: Translate,
+): string | null {
+  switch (reason) {
+    case "expired":
+      return t("auth.sessionExpired");
+    case "invalid":
+      return t("auth.sessionInvalid");
+    case "deleted":
+      return t("auth.accountDeleted");
+    default:
+      return null;
+  }
 }
 
 /** The message for a failed submission. Password errors use the policy the server published, when it is known. */
@@ -112,12 +129,7 @@ export function AuthPage({ mode }: { readonly mode: "login" | "register" }) {
     else register.mutate();
   }
 
-  const sessionMessage =
-    routeState.endReason === "expired"
-      ? t("auth.sessionExpired")
-      : routeState.endReason === "invalid"
-        ? t("auth.sessionInvalid")
-        : null;
+  const sessionMessage = sessionMessageFor(routeState.endReason, t);
 
   return (
     <div className={styles.page}>

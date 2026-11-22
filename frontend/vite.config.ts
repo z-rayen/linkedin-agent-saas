@@ -18,6 +18,8 @@ export default defineConfig(({ mode }) => {
         [apiPrefix]: {
           target,
           changeOrigin: false,
+          // Adds X-Forwarded-For with the browser's address, so the API's per-address login limit sees the client.
+          xfwd: true,
           rewrite: (path: string) => path.replace(new RegExp(`^${apiPrefix}`), ""),
         },
       },

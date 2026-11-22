@@ -52,8 +52,8 @@ def test_email_case_and_spaces_cannot_create_a_duplicate_account(client) -> None
 def test_repeated_failed_logins_block_the_account_even_with_the_right_password(client) -> None:  # type: ignore[no-untyped-def]
     password = "d" * get_settings().password_min_length
     _register(client, "dan@example.com", password)
-    limit = get_settings().login_max_failures
-    for _ in range(limit):
+    free = get_settings().login_free_failures
+    for _ in range(free):
         wrong = client.post("/auth/login", json={"email": "dan@example.com", "password": "not-the-password"})
         assert wrong.status_code == 401
 

@@ -12,6 +12,12 @@ import { ApplicationsListPage } from "./features/applications/ApplicationsListPa
 import { NewApplicationPage } from "./features/applications/NewApplicationPage";
 import { PreparationPage } from "./features/applications/PreparationPage";
 import { ReviewPage } from "./features/applications/ReviewPage";
+import { AccountPage } from "./features/account/AccountPage";
+import { ConnectionsPage } from "./features/connections/ConnectionsPage";
+import { ContentPage } from "./features/content/ContentPage";
+import { ProfilePage } from "./features/profile/ProfilePage";
+import { ResearchPage } from "./features/research/ResearchPage";
+import { WatchPage } from "./features/watch/WatchPage";
 import { MasterCvPage } from "./features/master-cv/MasterCvPage";
 import { I18nProvider, useI18n } from "./i18n/I18nProvider";
 
@@ -64,6 +70,12 @@ function Routed() {
           <Route path="applications/new" element={<NewApplicationPage />} />
           <Route path="applications/run/:runId" element={<PreparationPage />} />
           <Route path="applications/:applicationId" element={<ReviewPage />} />
+          <Route path="research" element={<ResearchPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+          <Route path="watch" element={<WatchPage />} />
+          <Route path="connections" element={<ConnectionsPage />} />
+          <Route path="content" element={<ContentPage />} />
+          <Route path="account" element={<AccountPage />} />
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />

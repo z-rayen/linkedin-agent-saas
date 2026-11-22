@@ -30,7 +30,7 @@ def test_callback_stores_encrypted_token_and_redirects(client, auth_headers, moc
     )
 
     assert response.status_code in (302, 307)
-    assert response.headers["location"].endswith("/dashboard.html?github=connected")
+    assert response.headers["location"].endswith("/connections?provider=github&status=connected")
     sent = seen[0]
     assert sent.headers["Accept"] == "application/json"
     assert b"test-code" in sent.content

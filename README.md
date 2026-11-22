@@ -390,10 +390,13 @@ Outside Docker, install Tectonic yourself and point `TECTONIC_PATH` at it (or pu
 
 ## Frontend (React)
 
-The React frontend lives in `frontend/`: Vite, React, TypeScript (strict), React Router and TanStack Query. It is being
-built in slices. Slice 1 covers login and registration, the master CV, new applications with live progress, the review
-screen, approval and sending, and the applications list. The previous plain-HTML app is kept in `frontend/legacy/` until
-the React screens reach parity. Node 26 is the tested version.
+The React frontend lives in `frontend/`: Vite, React, TypeScript (strict), React Router and TanStack Query. Slice 1
+covers login and registration, the master CV, new applications with live progress, the review screen, approval and
+sending, and the applications list. Slice 2 adds the research page (sourced answers, following the run by its progress
+stream with polling as the fallback), profile and knowledge base, the watch with "Prepare application" (which opens the
+form prefilled and never prepares anything by itself), connections (LinkedIn and GitHub: connected, expired or not
+connected), the content queue (edit, then publish after a confirmation), and the account page (deletion with the
+password typed again). The previous plain-HTML app is kept in `frontend/legacy/`. Node 26 is the tested version.
 
 ### Run it in development
 
@@ -479,19 +482,33 @@ Done in the backend, and used by the frontend:
   `code: password_too_long`).
 - **Email normalisation.** Case and surrounding spaces are removed on registration and login. Accounts created before
   this change with mixed-case addresses no longer match: normalise `users.email` in a data migration before deploying.
-- **Failed-login limit.** After `LOGIN_MAX_FAILURES` (default 5) failed logins within `LOGIN_WINDOW_SECONDS` (default
-  900), for one account or from one client address, logins are refused with 429 (`code: rate_limited`). The state is in
-  memory, per process: with several API workers the effective limit multiplies. Behind a reverse proxy every client
-  shares the proxy's address until forwarded headers are trusted, which is not done yet.
+- **Failed-login delay.** The first `LOGIN_FREE_FAILURES` (default 3) failures are free. After that, the wait before the
+  next attempt doubles with each failure (`LOGIN_BASE_DELAY_SECONDS`, default 2), capped at
+  `LOGIN_MAX_DELAY_SECONDS` (default 900). An attempt during the wait is refused with 429 (`code: rate_limited`,
+  `retry_after_seconds`), even with the right password. Nothing is locked for good: a quiet period of
+  `LOGIN_FORGET_SECONDS` (default 3600) forgets the count. The state is in memory, per process. See
+  [ADR 0004](docs/adr/0004-login-delay-and-trusted-proxies.md).
+- **Client address behind a proxy.** `TRUSTED_PROXIES` lists the reverse proxies whose `X-Forwarded-For` is believed
+  (comma-separated IPs or CIDR networks, validated at startup). Empty means the connection's own address is used. In
+  development, Vite sends the header (`xfwd: true`); set `TRUSTED_PROXIES=127.0.0.1` in `backend/.env` so the limit sees
+  the browser. Behind nginx, the proxy already appends the real address: list the nginx container's address. Do not list
+  a range that the published API port can be reached from.
+- **Account deletion with a wrong password** answers `403` (not `401`), so the frontend does not treat it as an
+  expired session.
+- **Connections**: `GET /oauth/connections` returns `connected`, `expired` or `not_connected` for LinkedIn and GitHub.
+  The OAuth callbacks now return to the React page `/connections`.
+- **Content**: `PATCH /content/{id}` edits a post's title or text (not after publication). Publishing a post that is
+  already published is refused (409).
 - **`cv.pdf`** is declared as `application/pdf` in the OpenAPI.
 - **Progress streams** are opened by the frontend with a single-use ticket (`POST /runs/{id}/stream-ticket`, then
   `GET /runs/{id}/events?ticket=`), with reconnection (`frontend/src/api/runStream.ts`).
 
 Still not done:
 
-1. **CORS and production origin.** Not needed while the browser uses the nginx proxy or the Vite proxy. It is needed
+1. **Disconnecting a provider** from the application: there is no endpoint yet; the connections page says so.
+2. **CORS and production origin.** Not needed while the browser uses the nginx proxy or the Vite proxy. It is needed
    only if the frontend is served from another origin; then `FRONTEND_ORIGIN` must list that origin.
-2. **Optional: `httpOnly` cookie authentication** (login sets the cookie, CSRF protection on unsafe methods, a logout
+3. **Optional: `httpOnly` cookie authentication** (login sets the cookie, CSRF protection on unsafe methods, a logout
    endpoint). This removes the token from the browser's JavaScript. It is a trade-off to decide in an ADR.
 
 ## Retired variables

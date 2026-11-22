@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState, type SyntheticEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { endpoints } from "../../api/endpoints";
 import type { ApplicationCreateBody } from "../../api/types";
 import { ApiErrorMessage } from "../../components/ApiErrorMessage";
+import { Banner } from "../../components/Banner";
 import { useI18n } from "../../i18n/I18nProvider";
 
 interface FormState {
@@ -61,7 +62,14 @@ export function NewApplicationPage() {
     company: useId(),
     source: useId(),
   };
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [params] = useSearchParams();
+  // Prefilled from the watch ("Prepare application"): the title and the link only. The recipient is never prefilled.
+  const [prefilled] = useState(() => params.has("job_title") || params.has("job_url"));
+  const [form, setForm] = useState<FormState>(() => ({
+    ...EMPTY_FORM,
+    jobTitle: params.get("job_title") ?? "",
+    jobUrl: params.get("job_url") ?? "",
+  }));
   const [errors, setErrors] = useState<FieldErrors>({
     jobTitle: false,
     recipient: false,
@@ -91,6 +99,7 @@ export function NewApplicationPage() {
     <section>
       <h1>{t("newApplication.title")}</h1>
       <p className="muted">{t("newApplication.intro")}</p>
+      {prefilled ? <Banner tone="info">{t("watch.prefilled")}</Banner> : null}
 
       <form onSubmit={onSubmit} noValidate>
         <div className="field">

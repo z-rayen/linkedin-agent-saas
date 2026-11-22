@@ -23,6 +23,34 @@ LINKEDIN_SCOPES = "openid profile email w_member_social"
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_SCOPES = "read:user repo"
+# The React page that shows the connections: the callbacks return the user there, with the outcome in the query.
+CONNECTIONS_PAGE = "/connections"
+PROVIDERS = ("linkedin", "github")
+CONNECTED = "connected"
+EXPIRED = "expired"
+NOT_CONNECTED = "not_connected"
+
+
+@router.get("/connections", summary="Connection state of each provider: connected, expired or not_connected")
+def connections(
+    db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+) -> list[dict[str, object]]:
+    rows: dict[str, models.OAuthToken] = {
+        str(row.provider): row
+        for row in db.query(models.OAuthToken).filter(models.OAuthToken.user_id == current_user.id).all()
+    }
+    now = utcnow()
+    result: list[dict[str, object]] = []
+    for provider in PROVIDERS:
+        row = rows.get(provider)
+        if row is None:
+            result.append({"provider": provider, "status": NOT_CONNECTED, "expires_at": None})
+        elif row.expires_at is not None and row.expires_at < now:
+            result.append({"provider": provider, "status": EXPIRED, "expires_at": row.expires_at.isoformat()})
+        else:
+            expires = row.expires_at.isoformat() if row.expires_at is not None else None
+            result.append({"provider": provider, "status": CONNECTED, "expires_at": expires})
+    return result
 
 
 def _bound_user_id(state: str, provider: str, db: Session) -> int:
@@ -96,7 +124,7 @@ async def linkedin_callback(code: str, state: str, db: Session = Depends(get_db)
         )
     db.commit()
 
-    return RedirectResponse(f"{settings.frontend_origin}/dashboard.html?linkedin=connected")
+    return RedirectResponse(f"{settings.frontend_origin}{CONNECTIONS_PAGE}?provider=linkedin&status=connected")
 
 
 @router.get("/github/authorize-url")
@@ -144,4 +172,4 @@ async def github_callback(code: str, state: str, db: Session = Depends(get_db)):
         db.add(models.OAuthToken(user_id=user_id, provider="github", access_token=encrypt_secret(access_token)))
     db.commit()
 
-    return RedirectResponse(f"{settings.frontend_origin}/dashboard.html?github=connected")
+    return RedirectResponse(f"{settings.frontend_origin}{CONNECTIONS_PAGE}?provider=github&status=connected")

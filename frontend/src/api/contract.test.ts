@@ -41,6 +41,22 @@ const CLIENT_CALLS: readonly Call[] = [
   { method: "get", path: "/applications/{id}/cv.pdf" },
   { method: "post", path: "/runs/{run_id}/stream-ticket" },
   { method: "get", path: "/applications/mail-mode" },
+  { method: "post", path: "/agent/research" },
+  { method: "get", path: "/agent/research/{run_id}" },
+  { method: "get", path: "/profile" },
+  { method: "post", path: "/profile" },
+  { method: "get", path: "/profile/knowledge" },
+  { method: "post", path: "/profile/knowledge" },
+  { method: "delete", path: "/profile/knowledge/{item_id}" },
+  { method: "get", path: "/watch/results" },
+  { method: "post", path: "/watch/run" },
+  { method: "get", path: "/oauth/connections" },
+  { method: "get", path: "/oauth/linkedin/authorize-url" },
+  { method: "get", path: "/content/queue" },
+  { method: "post", path: "/content/generate" },
+  { method: "patch", path: "/content/{content_id}" },
+  { method: "post", path: "/content/{content_id}/publish" },
+  { method: "delete", path: "/auth/account" },
 ];
 
 const normalise = (path: string): string => path.replace(/\{[^}]+\}/g, "{}");
@@ -68,6 +84,10 @@ describe("API client against the backend OpenAPI", () => {
     const responses =
       operationOf({ method: "get", path: "/applications/{id}/cv.pdf" })?.responses ?? {};
     expect(JSON.stringify(responses["200"])).toContain("application/pdf");
+  });
+
+  it("serves the GitHub authorize-url the connections page uses", () => {
+    expect(operationOf({ method: "get", path: "/oauth/github/authorize-url" })).toBeDefined();
   });
 
   it("serves the progress stream that runStream.ts opens with a ticket", () => {
