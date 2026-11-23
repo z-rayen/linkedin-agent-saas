@@ -5,14 +5,15 @@ from pathlib import Path
 
 from ..core.settings import get_settings
 from .compile import compile_latex, find_tectonic
+from .email import Language
 from .latex import render_cv
 from .models import MasterCV, TailoredCV
 
 
-def build_cv_pdf(master: MasterCV, cv: TailoredCV) -> bytes:
+def build_cv_pdf(master: MasterCV, cv: TailoredCV, language: Language = "en") -> bytes:
     """The PDF bytes for exactly this CV. Raises CVCompilationError if Tectonic cannot produce it."""
     settings = get_settings()
-    source = render_cv(master, cv)
+    source = render_cv(master, cv, language)
     with tempfile.TemporaryDirectory(prefix="cv-build-") as folder:
         out_dir = Path(folder)
         pdf = compile_latex(source, out_dir, find_tectonic(settings), settings.tectonic_timeout_seconds)

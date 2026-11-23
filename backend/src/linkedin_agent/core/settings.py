@@ -14,7 +14,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ReasoningEffort = Literal["", "low", "medium", "high"]  # "" means: not sent, the provider default applies
@@ -140,6 +140,27 @@ DEFAULT_RESEARCH_LANGUAGES: dict[str, ResearchLanguage] = {
 }
 
 
+DEFAULT_PROFILE_FIELD = "Machine Learning, Data Science"
+DEFAULT_PROFILE_SKILLS = "Python, TensorFlow, NLP, MLOps, AWS, SQL"
+DEFAULT_PROFILE_LEVEL = "Student / Junior"
+DEFAULT_PROFILE_MIN_MATCH_SCORE = 70
+DEFAULT_PROFILE_JOB_FEED_URL = "https://weworkremotely.com/categories/remote-data-science-jobs.rss"
+DEFAULT_PROFILE_CERT_FEED_URL = "https://aws.amazon.com/blogs/training-and-certification/feed/"
+
+# Built-in fallback for each text default, looked up by field name when the environment value is blank.
+_BUILT_IN_PROFILE_DEFAULTS: dict[str, str] = {
+    "default_field": DEFAULT_PROFILE_FIELD,
+    "default_skills": DEFAULT_PROFILE_SKILLS,
+    "default_level": DEFAULT_PROFILE_LEVEL,
+    "default_job_feed_url": DEFAULT_PROFILE_JOB_FEED_URL,
+    "default_cert_feed_url": DEFAULT_PROFILE_CERT_FEED_URL,
+}
+
+
+def _is_blank(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 class Settings(BaseSettings):
     # Tests set LINKEDIN_AGENT_NO_ENV_FILE=1 before any import, so backend/.env is never read in tests.
     model_config = SettingsConfigDict(
@@ -201,6 +222,8 @@ class Settings(BaseSettings):
     llm_step_overrides: dict[str, LLMStepOverride] = Field(default_factory=dict)
     # Grounding revisions per preparation: the graph feeds the exact problems back this many times at most.
     graph_max_revisions: int = 2
+    # Facts quoted one per sentence in the application email (experience and project facts the CV cites, in CV order).
+    email_max_facts: int = Field(default=3, ge=1, le=6)
     # A running job beats (proof of life) at every graph node, HTTP call and budget wait. A beat is never
     # older than this many seconds while the job waits, so waits longer than this are chunked.
     heartbeat_interval_seconds: float = Field(default=10.0, gt=0)
@@ -280,13 +303,14 @@ class Settings(BaseSettings):
     research_languages: dict[str, ResearchLanguage] = Field(default_factory=lambda: dict(DEFAULT_RESEARCH_LANGUAGES))
     research_default_language: str = "en"  # used when no language is detected in the request
 
-    # Default profile, used until the user saves their own.
-    default_field: str = "Machine Learning, Data Science"
-    default_skills: str = "Python, TensorFlow, NLP, MLOps, AWS, SQL"
-    default_level: str = "Student / Junior"
-    default_min_match_score: int = 70
-    default_job_feed_url: str = "https://weworkremotely.com/categories/remote-data-science-jobs.rss"
-    default_cert_feed_url: str = "https://aws.amazon.com/blogs/training-and-certification/feed/"
+    # Default profile, used until the user saves their own. A blank variable (DEFAULT_FIELD=) means "use the built-in
+    # value below", so an empty line in backend/.env cannot break the profile page.
+    default_field: str = DEFAULT_PROFILE_FIELD
+    default_skills: str = DEFAULT_PROFILE_SKILLS
+    default_level: str = DEFAULT_PROFILE_LEVEL
+    default_min_match_score: int = DEFAULT_PROFILE_MIN_MATCH_SCORE
+    default_job_feed_url: str = DEFAULT_PROFILE_JOB_FEED_URL
+    default_cert_feed_url: str = DEFAULT_PROFILE_CERT_FEED_URL
 
     # Web search (Serper.dev)
     serper_api_key: str = ""
@@ -384,6 +408,23 @@ class Settings(BaseSettings):
                 "or MAIL_ALLOW_REAL_RECIPIENTS=true (explicit opt-in to real recipients)"
             )
         return self
+
+    @field_validator(
+        "default_field",
+        "default_skills",
+        "default_level",
+        "default_job_feed_url",
+        "default_cert_feed_url",
+        mode="before",
+    )
+    @classmethod
+    def _blank_profile_text_uses_built_in(cls, value: object, info: ValidationInfo) -> object:
+        return _BUILT_IN_PROFILE_DEFAULTS[info.field_name or ""] if _is_blank(value) else value
+
+    @field_validator("default_min_match_score", mode="before")
+    @classmethod
+    def _blank_profile_score_uses_built_in(cls, value: object) -> object:
+        return DEFAULT_PROFILE_MIN_MATCH_SCORE if _is_blank(value) else value
 
     @field_validator("trusted_proxies")
     @classmethod

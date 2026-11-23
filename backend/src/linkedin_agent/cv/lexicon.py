@@ -71,7 +71,34 @@ DEGREE_CLAIMS: frozenset[str] = frozenset(
     }
 )  # fmt: skip
 
-CLAIM_WORDS: frozenset[str] = SCOPE_CLAIMS | LEVEL_CLAIMS | DEGREE_CLAIMS
+# Scope words that models add to a sentence without any fact behind them (seen in real drafts). They are claims: a
+# sentence may use one only when a cited fact uses it too.
+UNSUPPORTED_SCOPE_CLAIMS: frozenset[str] = frozenset(
+    {
+        "deploying", "designing", "engineered", "hands-on", "hands on", "improving user experience",
+        "improve user experience", "optimization", "optimisation", "optimizing", "optimising",
+    }
+)  # fmt: skip
+
+CLAIM_WORDS: frozenset[str] = SCOPE_CLAIMS | LEVEL_CLAIMS | DEGREE_CLAIMS | UNSUPPORTED_SCOPE_CLAIMS
+
+# Words that carry no fact on their own: function words, greetings, and words every application uses. A sentence that
+# shares only these with two facts does not mix the facts. Folded, four letters or more (shorter words are never facts).
+GENERIC_WORDS: frozenset[str] = frozenset(
+    fold(word)
+    for word in (
+        "about", "also", "applying", "application", "apply", "around", "candidate", "candidature", "company",
+        "dear", "entreprise", "experience", "experiences", "from", "have", "hello", "interest", "interested",
+        "internship", "into", "job", "looking", "more", "opportunity", "over", "poste", "position", "project",
+        "projet", "role", "stage", "team", "that", "their", "them", "there", "these", "this", "those", "thank",
+        "thanks", "using", "very", "which", "with", "within", "work", "working", "writing", "avec", "dans", "pour",
+        "sans", "dont", "cette", "ceci", "cela", "alors", "aussi", "ainsi", "entre", "comme", "plus", "tres",
+        "tout", "toute", "tous", "sont", "sera", "etre", "avoir", "fait", "faire", "mais", "donc", "votre", "notre",
+        "vous", "nous", "leur", "leurs", "bonjour", "madame", "monsieur", "regards", "cordialement", "sincerely",
+        "discuss", "conversation", "availability", "disponible", "merci", "builds", "build", "built", "created",
+        "developed", "implemented", "improved", "helped",
+    )
+)  # fmt: skip
 
 # Capitalised words that assert nothing. Stored as written; compared folded.
 _NON_CLAIM_DISPLAY: tuple[str, ...] = (

@@ -24,8 +24,8 @@ def _make_approved_application() -> int:
         row = models.Application(
             user_id=user.id,
             job_title="ML Intern",
-            recipient_email="hr@acme.com",
-            company_key="acme.com",
+            recipient_email="hr@acme.example",
+            company_key="acme.example",
             subject="Application",
             body="Hello.",
             status=ApplicationStatus.APPROVED.value,

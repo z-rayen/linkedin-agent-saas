@@ -25,6 +25,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from ..core.exceptions import ExternalServiceError
+from ..cv.email import build_body, email_facts, language_of
 from ..cv.models import Fact, MasterCV, TailoredCV
 from ..domain.outputs import JobAnalysis
 
@@ -49,6 +50,7 @@ class PreparationState(TypedDict, total=False):
     user_id: int
     job_title: str
     job_text: str  # untrusted: a job page or pasted text
+    language: str  # "fr" or "en": the user's choice, or detected from the title and the text
     job_url: str | None
     recipient_email: str
     company: str | None
@@ -75,11 +77,12 @@ class GraphDeps:
     research: Callable[[str], Awaitable[list[dict[str, str]]]]  # company name -> search results
     retrieve: Callable[[int, str], list[str]]  # (user_id, query) -> knowledge snippets
     tailor: Callable[[str, str, MasterCV, str], Awaitable[TailoredCV]]  # (title, job_text, master, feedback)
-    draft: Callable[[str, str, str], Awaitable[dict[str, str]]]  # (job_title, cv_summary, feedback)
+    draft: Callable[[str, str], Awaitable[dict[str, str]]]  # (job_title, feedback) -> subject, opening, closing
     verify: Callable[[TailoredCV, str, str, MasterCV, str], list[str]]  # (cv, subject, body, master, context)
     persist: Callable[[PreparationState], Awaitable[int]]  # stores the application as prepared, returns its id
     on_step: Callable[[str], Awaitable[None]]  # progress for the status endpoint
     max_revisions: int
+    email_max_facts: int  # facts quoted one per sentence in the email
 
 
 class PreparationError(Exception):
@@ -167,10 +170,20 @@ def build_graph(deps: GraphDeps, checkpointer: Any = None) -> Any:
         return {"cv_json": cv.model_dump_json()}
 
     async def draft_email(state: PreparationState) -> dict[str, Any]:
+        # The model writes the subject, the opening and the closing. The facts, the greeting and the sign-off are
+        # added here, from the facts the tailored CV cites, so the email never holds a sentence the model wrote
+        # about the candidate.
         cv = TailoredCV.model_validate_json(state["cv_json"])
-        summary = "\n".join(line.text for line in cv.lines)
-        mail = await deps.draft(state["job_title"], summary, state.get("feedback") or "(none)")
-        return {"subject": mail["subject"], "body": mail["body"]}
+        master = _master(state)
+        mail = await deps.draft(state["job_title"], state.get("feedback") or "(none)")
+        body = build_body(
+            state.get("language") or language_of(state["job_title"], state.get("job_text", "")),
+            mail.get("opening", ""),
+            mail.get("closing", ""),
+            email_facts(cv, master, deps.email_max_facts),
+            master,
+        )
+        return {"subject": mail["subject"], "body": body}
 
     async def verify(state: PreparationState) -> dict[str, Any]:
         cv = TailoredCV.model_validate_json(state["cv_json"])

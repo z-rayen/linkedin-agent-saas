@@ -1,5 +1,6 @@
+import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import relationship
 
 from .clock import utcnow
@@ -41,6 +42,10 @@ class ProfileConfig(Base):
     job_feed_url = Column(String)
     cert_feed_url = Column(String)
     master_cv_json = Column(Text, nullable=True)  # validated MasterCV, written by the user
+    # Watch preferences (migration 0011). Null means "use the settings default" (see services/watch_pipeline.py).
+    regions = Column(Text, nullable=True)  # JSON list of regions used in the search queries
+    languages = Column(Text, nullable=True)  # JSON list of languages of the offers
+    offer_type = Column(String, nullable=True)  # for example "end-of-studies internship"
 
     user = relationship("User", back_populates="profile")
 
@@ -73,6 +78,12 @@ class WatchResult(Base):
     justification = Column(Text, nullable=True)
     cover_letter = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+    # Provenance (migration 0012). Rows written before it are unverified: they were judged on the search snippet.
+    canonical_link = Column(String, nullable=True, index=True)  # the dedupe key; old rows are canonicalised on read
+    fetched = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    unverified = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    company = Column(String, nullable=True)  # grounded in the text the result was judged on, or null
+    job_title = Column(String, nullable=True)  # grounded in the text the result was judged on, or null
 
 
 class AgentMessage(Base):

@@ -2,10 +2,10 @@ import secrets
 from datetime import timedelta
 from typing import Any
 
+import bcrypt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from . import models
@@ -13,20 +13,27 @@ from .clock import utcnow
 from .core.settings import get_settings
 from .database import get_db
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=get_settings().bcrypt_rounds)
 OAUTH_STATE_PURPOSE = "oauth_state"
 # bcrypt reads at most 72 bytes of a password. Longer passwords are refused rather than silently cut.
 BCRYPT_MAX_BYTES = 72
 
 
 def hash_password(password: str) -> str:
-    hashed: str = pwd_context.hash(password)
-    return hashed
+    """A bcrypt hash in the $2b$ format, the same format as the hashes stored before passlib was removed."""
+    salt = bcrypt.gensalt(rounds=get_settings().bcrypt_rounds)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    valid: bool = pwd_context.verify(plain, hashed)
-    return valid
+    """Constant-time comparison. A password over bcrypt's byte limit never matches: bcrypt would read only its first
+    72 bytes, so two different long passwords would share a hash. Registration refuses such passwords anyway."""
+    encoded = plain.encode("utf-8")
+    if len(encoded) > BCRYPT_MAX_BYTES:
+        return False
+    try:
+        return bcrypt.checkpw(encoded, hashed.encode("ascii"))
+    except ValueError:
+        return False
 
 
 def create_access_token(data: dict[str, Any]) -> str:

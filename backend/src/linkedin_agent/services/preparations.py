@@ -161,6 +161,7 @@ def _initial_state(payload: dict[str, Any], user_id: int, master_json: str) -> d
         "job_title": str(payload["job_title"]),
         "job_text": str(payload.get("job_text") or ""),
         "job_url": payload.get("job_url"),
+        "language": payload.get("language") or None,
         "recipient_email": str(payload["recipient_email"]),
         "company": payload.get("company"),
         "master_json": master_json,
@@ -186,8 +187,8 @@ def _deps(db: Session, run_id: int, user_id: int, profile: dict[str, str], setti
     async def tailor(title: str, text: str, master: MasterCV, feedback: str) -> TailoredCV:
         return (await tailor_cv(title, text, master, feedback=feedback)).cv
 
-    async def draft(title: str, summary: str, feedback: str) -> dict[str, str]:
-        return await generate_application_email(title, summary, profile, feedback=feedback)
+    async def draft(title: str, feedback: str) -> dict[str, str]:
+        return await generate_application_email(title, profile, feedback=feedback)
 
     async def persist(state: Any) -> int:
         return persist_prepared(db, state)
@@ -206,6 +207,7 @@ def _deps(db: Session, run_id: int, user_id: int, profile: dict[str, str], setti
         persist=persist,
         on_step=on_step,
         max_revisions=settings.graph_max_revisions,
+        email_max_facts=settings.email_max_facts,
     )
 
 

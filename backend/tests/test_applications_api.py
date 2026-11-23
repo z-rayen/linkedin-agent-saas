@@ -110,7 +110,7 @@ def fake_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_preparing_without_a_master_cv_is_refused(client: TestClient, auth_headers: dict[str, str]) -> None:
-    r = client.post("/applications", json={**JOB, "recipient_email": "hr@acme.com"}, headers=auth_headers)
+    r = client.post("/applications", json={**JOB, "recipient_email": "hr@acme.example"}, headers=auth_headers)
     assert r.status_code == 400
     assert "master CV" in r.json()["detail"]
 
@@ -119,7 +119,7 @@ def test_grounded_cv_is_stored_with_no_problems(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict
 ) -> None:
     _with_master(client, auth_headers)
-    app_row = _prepare(client, auth_headers, "hr@acme.com")
+    app_row = _prepare(client, auth_headers, "hr@acme.example")
     assert app_row["status"] == "prepared"
     assert app_row["grounding_problems"] == []
     assert app_row["cv_lines"][0]["source_ids"] == ["exp-1"]
@@ -131,7 +131,7 @@ def test_grounded_cv_is_stored_with_no_problems(
 def test_ungrounded_cv_cannot_be_approved(client: TestClient, auth_headers: dict[str, str], cv_answer: dict) -> None:
     _with_master(client, auth_headers)
     cv_answer["cv"] = UNGROUNDED_CV
-    app_row = _prepare(client, auth_headers, "hr@acme.com")
+    app_row = _prepare(client, auth_headers, "hr@acme.example")
     assert app_row["grounding_problems"]  # the check found claims it cannot trace
 
     r = _approve(client, auth_headers, app_row["id"])
@@ -142,7 +142,7 @@ def test_ungrounded_cv_cannot_be_approved(client: TestClient, auth_headers: dict
 
 def test_grounded_cv_can_be_approved(client: TestClient, auth_headers: dict[str, str], cv_answer: dict) -> None:
     _with_master(client, auth_headers)
-    app_row = _prepare(client, auth_headers, "hr@acme.com")
+    app_row = _prepare(client, auth_headers, "hr@acme.example")
     r = _approve(client, auth_headers, app_row["id"])
     assert r.status_code == 200
     assert r.json()["status"] == "approved"
@@ -151,7 +151,7 @@ def test_grounded_cv_can_be_approved(client: TestClient, auth_headers: dict[str,
 
 def test_approval_cannot_be_repeated(client: TestClient, auth_headers: dict[str, str], cv_answer: dict) -> None:
     _with_master(client, auth_headers)
-    app_row = _prepare(client, auth_headers, "hr@acme.com")
+    app_row = _prepare(client, auth_headers, "hr@acme.example")
     _approve(client, auth_headers, app_row["id"])
     r = _approve(client, auth_headers, app_row["id"])
     assert r.status_code == 409
@@ -165,7 +165,7 @@ def test_nothing_is_sent_without_approval(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict, mailer: RecordingMailer
 ) -> None:
     _with_master(client, auth_headers)
-    app_row = _prepare(client, auth_headers, "hr@acme.com")
+    app_row = _prepare(client, auth_headers, "hr@acme.example")
     r = _send(client, auth_headers, app_row["id"])
     assert r.status_code == 409
     assert mailer.sent == []
@@ -176,7 +176,7 @@ def test_dry_run_checks_everything_and_changes_nothing(
 ) -> None:
     # No override here: the real default mailer is used, and dry-run is on by default.
     _with_master(client, auth_headers)
-    app_row = _prepare(client, auth_headers, "hr@acme.com")
+    app_row = _prepare(client, auth_headers, "hr@acme.example")
     _approve(client, auth_headers, app_row["id"])
     r = _send(client, auth_headers, app_row["id"])
     assert r.status_code == 200
@@ -190,7 +190,7 @@ def test_failed_transport_marks_the_application_failed(
     app.dependency_overrides[get_mailer] = lambda: FailingMailer()
     try:
         _with_master(client, auth_headers)
-        app_row = _prepare(client, auth_headers, "hr@acme.com")
+        app_row = _prepare(client, auth_headers, "hr@acme.example")
         _approve(client, auth_headers, app_row["id"])
         r = _send(client, auth_headers, app_row["id"])
         assert r.status_code == 502
@@ -212,11 +212,11 @@ def test_second_application_to_the_same_company_is_refused(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict, mailer: RecordingMailer
 ) -> None:
     _with_master(client, auth_headers)
-    first = _send_approved(client, auth_headers, "jobs@acme.com", cv_answer)
+    first = _send_approved(client, auth_headers, "jobs@acme.example", cv_answer)
     assert first["response"].status_code == 200
     assert first["response"].json()["dry_run"] is False
 
-    second = _send_approved(client, auth_headers, "hr@acme.com", cv_answer)  # same domain, different person
+    second = _send_approved(client, auth_headers, "hr@acme.example", cv_answer)  # same domain, different person
     assert second["response"].status_code == 409
     assert second["response"].json()["code"] == "send_policy_violation"
     assert "company" in second["response"].json()["detail"]
@@ -227,8 +227,8 @@ def test_same_recipient_is_refused(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict, mailer: RecordingMailer
 ) -> None:
     _with_master(client, auth_headers)
-    _send_approved(client, auth_headers, "jobs@acme.com", cv_answer)
-    again = _send_approved(client, auth_headers, "jobs@acme.com", cv_answer)
+    _send_approved(client, auth_headers, "jobs@acme.example", cv_answer)
+    again = _send_approved(client, auth_headers, "jobs@acme.example", cv_answer)
     assert again["response"].status_code == 409
     assert "recipient" in again["response"].json()["detail"]
 
@@ -247,7 +247,7 @@ def test_company_match_is_per_user(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict, mailer: RecordingMailer
 ) -> None:
     _with_master(client, auth_headers)
-    _send_approved(client, auth_headers, "jobs@acme.com", cv_answer)
+    _send_approved(client, auth_headers, "jobs@acme.example", cv_answer)
 
     client.post("/auth/register", json={"email": "carol@example.com", "password": "carol-pass-1"})
     token = client.post("/auth/login", json={"email": "carol@example.com", "password": "carol-pass-1"}).json()[
@@ -255,7 +255,7 @@ def test_company_match_is_per_user(
     ]
     carol = {"Authorization": f"Bearer {token}"}
     _with_master(client, carol)
-    carol_send = _send_approved(client, carol, "jobs@acme.com", cv_answer)
+    carol_send = _send_approved(client, carol, "jobs@acme.example", cv_answer)
     assert carol_send["response"].status_code == 200  # another user may write to the same company
 
 
@@ -266,7 +266,7 @@ def test_applications_are_private_to_their_owner(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict
 ) -> None:
     _with_master(client, auth_headers)
-    row = _prepare(client, auth_headers, "hr@acme.com")
+    row = _prepare(client, auth_headers, "hr@acme.example")
 
     client.post("/auth/register", json={"email": "dave@example.com", "password": "dave-pass-1234"})
     token = client.post("/auth/login", json={"email": "dave@example.com", "password": "dave-pass-1234"}).json()[
@@ -282,7 +282,7 @@ def test_send_timestamp_is_recorded(
     client: TestClient, auth_headers: dict[str, str], cv_answer: dict, mailer: RecordingMailer
 ) -> None:
     _with_master(client, auth_headers)
-    sent = _send_approved(client, auth_headers, "jobs@acme.com", cv_answer)
+    sent = _send_approved(client, auth_headers, "jobs@acme.example", cv_answer)
     detail = client.get(f"/applications/{sent['id']}", headers=auth_headers).json()
     assert detail["status"] == "sent"
     assert datetime.fromisoformat(detail["sent_at"])  # parses, so it was written

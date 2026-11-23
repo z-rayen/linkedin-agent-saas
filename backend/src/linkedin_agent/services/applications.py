@@ -20,7 +20,7 @@ from ..core.exceptions import (
 )
 from ..core.settings import Settings, get_settings
 from ..cv.build import build_cv_pdf
-from ..cv.email import with_signature
+from ..cv.email import DEFAULT_LANGUAGE, Language, with_signature
 from ..cv.grounding import GroundingProblem, verify_cv, verify_email
 from ..cv.models import MasterCV, TailoredCV, TailoredLine
 from ..domain.applications import (
@@ -152,12 +152,16 @@ def _refresh_grounding(application: models.Application, master: MasterCV) -> Non
     )
 
 
+def _language_of(application: models.Application) -> Language:
+    return "fr" if application.language == "fr" else "en"
+
+
 def _freeze_pdf(application: models.Application, master: MasterCV) -> None:
     """Compile the CV now and keep exactly these bytes. A broken LaTeX template fails here, loudly."""
     cv = tailored_cv_of(application)
     if cv is None:
         raise ValidationFailedError("no tailored CV stored")
-    pdf = build_cv_pdf(master, cv)
+    pdf = build_cv_pdf(master, cv, _language_of(application))
     application.cv_pdf = pdf
     application.cv_pdf_sha256 = hashlib.sha256(pdf).hexdigest()
 
@@ -191,6 +195,7 @@ def persist_prepared(db: Session, state: dict[str, object]) -> int:
         user_id=int(str(state["user_id"])),
         company=str(state["company"]) if state.get("company") else None,
         job_title=str(state["job_title"]),
+        language=str(state.get("language") or DEFAULT_LANGUAGE),
         recipient_email=recipient,
         subject=str(state["subject"]),
         body=with_signature(str(state["body"]), master),

@@ -29,7 +29,7 @@ GROUNDED = {
     "lines": [{"section": "experience", "text": "Built a document question-answering service", "source_ids": ["exp-1"]}]
 }
 UNGROUNDED = {"lines": [{"section": "experience", "text": "Led a team of 40 engineers", "source_ids": ["exp-1"]}]}
-JOB = {"job_title": "ML Intern", "job_text": "We need Python and FastAPI.", "recipient_email": "hr@acme.com"}
+JOB = {"job_title": "ML Intern", "job_text": "We need Python and FastAPI.", "recipient_email": "hr@acme.example"}
 PREPARED = ApplicationStatus.PREPARED.value
 
 

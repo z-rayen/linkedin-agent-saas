@@ -20,18 +20,18 @@ LLM_COMPLETE = "linkedin_agent.infra.llm.GroqClient.complete"
 
 
 def test_email_prefers_recruitment_addresses() -> None:
-    html = '<a href="mailto:ceo@acme.com">x</a> <a>jobs@acme.com</a>'
-    assert find_application_email(html) == "jobs@acme.com"
+    html = '<a href="mailto:ceo@acme.example">x</a> <a>jobs@acme.example</a>'
+    assert find_application_email(html) == "jobs@acme.example"
 
 
 def test_email_ignores_noreply_and_asset_like_matches() -> None:
-    html = "noreply@acme.com logo@2x.png sentry@acme.com"
+    html = "noreply@acme.example logo@2x.png sentry@acme.example"
     assert find_application_email(html) is None
 
 
 def test_email_is_lowercased_and_deduplicated() -> None:
-    html = "HR@Acme.COM hr@acme.com"
-    assert find_application_email(html) == "hr@acme.com"
+    html = "HR@acme.example hr@acme.example"
+    assert find_application_email(html) == "hr@acme.example"
 
 
 def test_email_returns_none_when_page_has_no_address() -> None:

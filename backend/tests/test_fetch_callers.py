@@ -15,7 +15,7 @@ PAGE = """
 <html><head><script>var secret = 1;</script><style>p{}</style></head>
 <body><nav>menu</nav><header>top</header>
 <p>We need   Python and FastAPI.</p><footer>legal</footer>
-<p>Contact jobs@acme.com</p></body></html>
+<p>Contact jobs@acme.example</p></body></html>
 """
 
 
@@ -33,7 +33,7 @@ def test_job_page_keeps_the_html_and_returns_clean_text(monkeypatch: pytest.Monk
     html, text = asyncio.run(apply_service.fetch_job_page("https://jobs.example.com/1"))
     assert html == PAGE
     assert "We need Python and FastAPI." in text
-    assert "Contact jobs@acme.com" in text
+    assert "Contact jobs@acme.example" in text
     for dropped in ("var secret", "menu", "top", "legal", "p{}"):
         assert dropped not in text
 

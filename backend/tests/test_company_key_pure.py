@@ -11,10 +11,10 @@ FREE = get_settings().free_mail_domains
 @pytest.mark.parametrize(
     ("address", "expected"),
     [
-        ("jobs@acme.com", "acme.com"),
-        ("recruiting@sub.acme.fr", "sub.acme.fr"),
-        ("JOBS@ACME.COM", "acme.com"),
-        ("  hr@acme.com  ", "acme.com"),
+        ("jobs@acme.example", "acme.example"),
+        ("recruiting@sub.acme.example", "sub.acme.example"),
+        ("JOBS@acme.example", "acme.example"),
+        ("  hr@acme.example  ", "acme.example"),
     ],
 )
 def test_company_domain_identifies_the_employer(address: str, expected: str) -> None:
@@ -36,8 +36,8 @@ def test_free_mail_domains_fall_back_to_the_full_address(address: str) -> None:
 
 
 def test_wildcard_only_matches_the_exact_provider() -> None:
-    # "notyahoo.com" must not be treated as Yahoo.
-    assert company_key("hr@notyahoo.com", FREE) == "notyahoo.com"
+    # "notyahoo.example" must not be treated as Yahoo.
+    assert company_key("hr@notyahoo.example", FREE) == "notyahoo.example"
 
 
 def test_two_free_mail_candidates_are_never_the_same_company() -> None:
@@ -46,7 +46,7 @@ def test_two_free_mail_candidates_are_never_the_same_company() -> None:
 
 def test_free_mail_list_is_configurable() -> None:
     # If the list is changed, the behaviour follows it.
-    assert company_key("hr@acme.com", ["acme.com"]) == "hr@acme.com"
+    assert company_key("hr@acme.example", ["acme.example"]) == "hr@acme.example"
 
 
 def test_address_without_domain_is_returned_unchanged() -> None:

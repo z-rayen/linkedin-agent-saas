@@ -24,7 +24,11 @@ GROUNDED_CV = {
         {"section": "skill", "text": "Python", "source_ids": ["skill-py"]},
     ]
 }
-HONEST_EMAIL = {"subject": "Application for ML Intern", "body": "Hello, I am interested in the role."}
+HONEST_EMAIL = {
+    "subject": "Application for ML Intern",
+    "opening": "I am interested in the role.",
+    "closing": "I would welcome a conversation.",
+}
 PDF = b"%PDF-1.4 integrity test"
 
 
@@ -81,7 +85,7 @@ def _setup(client: TestClient, headers: dict[str, str]) -> None:
     assert client.put("/applications/master-cv", json=SAMPLE_MASTER, headers=headers).status_code == 200
 
 
-def _prepare(client: TestClient, headers: dict[str, str], recipient: str = "hr@acme.com") -> dict:
+def _prepare(client: TestClient, headers: dict[str, str], recipient: str = "hr@acme.example") -> dict:
     return prepare_via_api(client, headers, {**JOB, "recipient_email": recipient})
 
 
@@ -113,7 +117,11 @@ def test_email_body_with_an_untraceable_claim_blocks_approval(
     client: TestClient, auth_headers: dict[str, str], answers: dict
 ) -> None:
     _setup(client, auth_headers)
-    answers["email"] = {"subject": "Application for ML Intern", "body": "I led a team of 40 engineers."}
+    answers["email"] = {
+        "subject": "Application for ML Intern",
+        "opening": "I led a team of 40 engineers.",
+        "closing": "",
+    }
     row = _prepare(client, auth_headers)
     assert any(problem["message"].startswith("email body:") for problem in row["grounding_problems"])
     r = _approve(client, auth_headers, row["id"])
@@ -251,7 +259,7 @@ def test_real_send_with_the_wrong_confirmation_is_refused(
 ) -> None:
     _setup(client, auth_headers)
     row = _approved(client, auth_headers)
-    r = _send(client, auth_headers, row["id"], confirm="someone-else@acme.com")
+    r = _send(client, auth_headers, row["id"], confirm="someone-else@acme.example")
     assert r.status_code == 400
     assert recorder.sent == []
 
@@ -261,7 +269,7 @@ def test_confirmation_is_case_insensitive(
 ) -> None:
     _setup(client, auth_headers)
     row = _approved(client, auth_headers)
-    assert _send(client, auth_headers, row["id"], confirm="HR@ACME.COM").status_code == 200
+    assert _send(client, auth_headers, row["id"], confirm="HR@acme.example").status_code == 200
 
 
 # --- 6. the attachment and the redirection ------------------------------------------
@@ -274,7 +282,7 @@ def test_attachment_is_the_pdf_built_from_the_approved_content(
     row = _approved(client, auth_headers)
     _send(client, auth_headers, row["id"])
     assert recorder.sent[0].attachment == PDF
-    assert recorder.sent[0].to == "hr@acme.com"
+    assert recorder.sent[0].to == "hr@acme.example"
 
 
 def test_redirect_sends_every_message_to_the_test_address(
@@ -291,7 +299,7 @@ def test_redirect_sends_every_message_to_the_test_address(
     assert r.status_code == 200
     message = recorder.sent[0]
     assert message.to == "me@example.com"
-    assert message.original_to == "hr@acme.com"
+    assert message.original_to == "hr@acme.example"
     assert message.subject.startswith("[redirected]")
 
 

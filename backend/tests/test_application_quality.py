@@ -72,13 +72,13 @@ def test_the_model_body_with_a_placeholder_is_a_problem_even_with_a_signature() 
     assert "placeholder" in kinds
 
 
-def test_the_email_prompt_forbids_closings_signatures_and_placeholders() -> None:
+def test_the_email_prompt_asks_for_two_sentences_and_forbids_the_frame_and_placeholders() -> None:
     from linkedin_agent.prompts import render
 
-    prompt = render(
-        "application_email.v2", field="ML", level="Junior", cv_summary="x", job_title="y", feedback="(none)"
-    )
-    assert "Do NOT write a greeting closing" in prompt
+    prompt = render("application_email.v3", field="ML", level="Junior", job_title="y", feedback="(none)")
+    assert "opening sentence" in prompt
+    assert "closing sentence" in prompt
+    assert "Never write a greeting" in prompt
     assert "Never write a placeholder" in prompt
 
 
@@ -229,7 +229,8 @@ def test_the_approval_refusal_lists_every_problem_in_the_response(
     _setup(client, auth_headers)
     answers["email"] = {
         "subject": "Application",
-        "body": "I led a team of 40 engineers. I managed 3 teams and I am proficient in Docker. Expert in SQL.",
+        "opening": "I led a team of 40 engineers. I managed 3 teams and I am proficient in Docker. Expert in SQL.",
+        "closing": "",
     }
     row = _prepare(client, auth_headers)
     stored = row["grounding_problems"]
@@ -252,8 +253,8 @@ def test_a_preparation_that_used_its_revisions_says_so_in_its_status(
     answers: dict,  # noqa: F811
 ) -> None:
     _setup(client, auth_headers)
-    answers["email"] = {"subject": "Application", "body": "I led a team of 40 engineers."}
-    run = client.post("/applications", json={**JOB, "recipient_email": "hr@acme.com"}, headers=auth_headers).json()
+    answers["email"] = {"subject": "Application", "opening": "I led a team of 40 engineers.", "closing": ""}
+    run = client.post("/applications", json={**JOB, "recipient_email": "hr@acme.example"}, headers=auth_headers).json()
     status = client.get(f"/applications/preparations/{run['run_id']}", headers=auth_headers).json()
     assert status["status"] == "awaiting_review"
     assert status["grounding"]["revision_limit_reached"] is True
@@ -267,6 +268,6 @@ def test_a_clean_preparation_does_not_claim_a_revision_limit(
     answers: dict,  # noqa: F811
 ) -> None:
     _setup(client, auth_headers)
-    run = client.post("/applications", json={**JOB, "recipient_email": "hr@acme.com"}, headers=auth_headers).json()
+    run = client.post("/applications", json={**JOB, "recipient_email": "hr@acme.example"}, headers=auth_headers).json()
     status = client.get(f"/applications/preparations/{run['run_id']}", headers=auth_headers).json()
     assert status["grounding"] == {"problems": 0, "revision_limit_reached": False, "message": "No grounding problem."}

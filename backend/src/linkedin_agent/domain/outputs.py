@@ -69,10 +69,11 @@ class ReflectOutput(BaseModel):
 
 
 class ApplicationEmailOutput(BaseModel):
-    """Subject and body of a job application email."""
+    """The sentences the model writes for a job application email. The facts and the frame are added by the code."""
 
     subject: str
-    body: str
+    opening: str = Field(default="", max_length=400)
+    closing: str = Field(default="", max_length=400)
 
 
 class JobAnalysis(BaseModel):

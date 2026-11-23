@@ -99,24 +99,24 @@ LINES = [{"section": "experience", "text": "Built a service", "source_ids": ["ex
 
 
 def test_hash_is_stable_for_identical_content() -> None:
-    assert content_hash("S", "B", "a@acme.com", LINES) == content_hash("S", "B", "a@acme.com", LINES)
+    assert content_hash("S", "B", "a@acme.example", LINES) == content_hash("S", "B", "a@acme.example", LINES)
 
 
 @pytest.mark.parametrize(
     "changed",
     [
-        ("S2", "B", "a@acme.com", LINES),
-        ("S", "B2", "a@acme.com", LINES),
-        ("S", "B", "b@acme.com", LINES),
-        ("S", "B", "a@acme.com", [{**LINES[0], "text": "Led a service"}]),
+        ("S2", "B", "a@acme.example", LINES),
+        ("S", "B2", "a@acme.example", LINES),
+        ("S", "B", "b@acme.example", LINES),
+        ("S", "B", "a@acme.example", [{**LINES[0], "text": "Led a service"}]),
     ],
 )
 def test_hash_changes_when_any_sent_part_changes(changed: tuple) -> None:  # type: ignore[type-arg]
-    assert content_hash(*changed) != content_hash("S", "B", "a@acme.com", LINES)
+    assert content_hash(*changed) != content_hash("S", "B", "a@acme.example", LINES)
 
 
 def test_hash_ignores_recipient_case_and_spacing() -> None:
-    assert content_hash("S", "B", " A@Acme.com ", LINES) == content_hash("S", "B", "a@acme.com", LINES)
+    assert content_hash("S", "B", " A@acme.example ", LINES) == content_hash("S", "B", "a@acme.example", LINES)
 
 
 # --- timezone for the daily cap ----------------------------------------------------

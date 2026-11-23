@@ -91,7 +91,7 @@ def recorder() -> Recorder:
 def _setup(client: TestClient, headers: dict[str, str]) -> int:
     assert client.put("/applications/master-cv", json=SAMPLE, headers=headers).status_code == 200
     app_id = prepare_via_api(
-        client, headers, {"job_title": "ML Intern", "job_text": "Python", "recipient_email": "hr@acme.com"}
+        client, headers, {"job_title": "ML Intern", "job_text": "Python", "recipient_email": "hr@acme.example"}
     )["id"]
     assert client.post(f"/applications/{app_id}/approve", headers=headers).status_code == 200
     return app_id
@@ -268,7 +268,7 @@ def test_a_broken_template_is_caught_at_preparation(
     ):
         r = client.post(
             "/applications",
-            json={"job_title": "ML Intern", "job_text": "Python", "recipient_email": "hr@acme.com"},
+            json={"job_title": "ML Intern", "job_text": "Python", "recipient_email": "hr@acme.example"},
             headers=auth_headers,
         )
     assert r.status_code == 202
@@ -283,7 +283,7 @@ def test_a_broken_template_blocks_approval_and_leaves_the_status_alone(
 ) -> None:
     assert client.put("/applications/master-cv", json=SAMPLE, headers=auth_headers).status_code == 200
     app_id = prepare_via_api(
-        client, auth_headers, {"job_title": "ML Intern", "job_text": "Python", "recipient_email": "hr@acme.com"}
+        client, auth_headers, {"job_title": "ML Intern", "job_text": "Python", "recipient_email": "hr@acme.example"}
     )["id"]
     with patch(
         "linkedin_agent.services.applications.build_cv_pdf",

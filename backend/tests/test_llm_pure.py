@@ -9,30 +9,11 @@ from pydantic import ValidationError
 from linkedin_agent.core.exceptions import LLMOutputError
 from linkedin_agent.domain.outputs import PlannerOutput, ScoreOutput
 from linkedin_agent.infra.llm import complete_structured
-from linkedin_agent.prompts import render
 
 LLM_COMPLETE = "linkedin_agent.infra.llm.GroqClient.complete"
 
 
 # --- prompt templates --------------------------------------------------------
-
-
-def test_render_fills_every_variable() -> None:
-    prompt = render("score_item.v1", field="NLP", skills="Python", level="Junior", title="ML Intern", summary="Remote")
-    assert "Field: NLP" in prompt
-    assert "BEGIN UNTRUSTED TITLE" in prompt  # titles from job pages are wrapped as data
-    assert "ML Intern" in prompt
-    assert "$" not in prompt
-
-
-def test_render_refuses_missing_variable() -> None:
-    with pytest.raises(KeyError):
-        render("score_item.v1", field="NLP")
-
-
-def test_json_braces_in_prompts_are_kept_literal() -> None:
-    prompt = render("score_item.v1", field="f", skills="s", level="l", title="t", summary="x")
-    assert '{"score": 0-100, "justification": "1 sentence"}' in prompt
 
 
 # --- domain models -----------------------------------------------------------

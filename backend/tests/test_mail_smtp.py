@@ -86,7 +86,12 @@ def fake_connect(host: str, port: int, timeout: float) -> FakeSMTP:
 
 
 def message(**overrides: Any) -> OutgoingMessage:
-    base: dict[str, Any] = {"to": "hr@acme.com", "subject": "Application", "body": "Hello.", "attachment": b"%PDF-1.4"}
+    base: dict[str, Any] = {
+        "to": "hr@acme.example",
+        "subject": "Application",
+        "body": "Hello.",
+        "attachment": b"%PDF-1.4",
+    }
     base.update(overrides)
     return OutgoingMessage(**base)
 
@@ -97,7 +102,7 @@ def message(**overrides: Any) -> OutgoingMessage:
 def test_message_has_the_expected_headers_and_pdf_attachment() -> None:
     email = build_message(SENDER, message())
     assert email["From"] == SENDER
-    assert email["To"] == "hr@acme.com"
+    assert email["To"] == "hr@acme.example"
     assert email["Subject"] == "Application"
     assert email["Message-ID"]
     attachments = list(email.iter_attachments())
@@ -111,13 +116,13 @@ def test_subject_with_line_break_is_refused(subject: str) -> None:
         build_message(SENDER, message(subject=subject))
 
 
-@pytest.mark.parametrize("address", ["hr@acme.com\r\nBcc: evil@example.com", "hr@acme.com\nRCPT"])
+@pytest.mark.parametrize("address", ["hr@acme.example\r\nBcc: evil@example.com", "hr@acme.example\nRCPT"])
 def test_address_with_line_break_is_refused(address: str) -> None:
     with pytest.raises(ValidationFailedError):
         build_message(SENDER, message(to=address))
 
 
-@pytest.mark.parametrize("address", ["not-an-email", "user@@acme.com", "a b@acme.com", ""])
+@pytest.mark.parametrize("address", ["not-an-email", "user@@acme.example", "a b@acme.example", ""])
 def test_invalid_recipient_is_refused(address: str) -> None:
     with pytest.raises(ValidationFailedError):
         validate_address(address)
@@ -131,8 +136,8 @@ def test_attachment_name_cannot_escape_the_folder() -> None:
 
 
 def test_original_recipient_header_is_added_when_redirected() -> None:
-    email = build_message(SENDER, message(to="me@example.com", original_to="hr@acme.com"))
-    assert email["X-Original-Recipient"] == "hr@acme.com"
+    email = build_message(SENDER, message(to="me@example.com", original_to="hr@acme.example"))
+    assert email["X-Original-Recipient"] == "hr@acme.example"
 
 
 def test_body_is_utf8_for_french_text() -> None:
@@ -183,14 +188,14 @@ def test_implicit_tls_port_does_not_issue_starttls() -> None:
 def test_smtp_error_is_reported_without_server_text_or_secrets(caplog: pytest.LogCaptureFixture) -> None:
     import asyncio
 
-    FakeSMTP.fail_with = smtplib.SMTPRecipientsRefused({"hr@acme.com": (550, b"echo: " + SECRET.encode())})
+    FakeSMTP.fail_with = smtplib.SMTPRecipientsRefused({"hr@acme.example": (550, b"echo: " + SECRET.encode())})
     caplog.set_level(logging.DEBUG)
     with pytest.raises(ExternalServiceError) as raised:
         asyncio.run(_send(make_settings(), message()))
     assert raised.value.message == "SMTP delivery failed"
     assert SECRET not in raised.value.message
     assert all(SECRET not in record.getMessage() for record in caplog.records)
-    assert all("hr@acme.com" not in record.getMessage() for record in caplog.records)
+    assert all("hr@acme.example" not in record.getMessage() for record in caplog.records)
 
 
 def test_credentials_are_never_logged_on_success(caplog: pytest.LogCaptureFixture) -> None:

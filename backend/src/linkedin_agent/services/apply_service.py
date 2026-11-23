@@ -60,12 +60,13 @@ async def generate_tailored_cv_text(job_title: str, job_text: str, profile: dict
         return CV_TEXT_FALLBACK
 
 
-async def generate_application_email(job_title: str, cv_summary: str, profile: dict, feedback: str = "(none)") -> dict:
+async def generate_application_email(job_title: str, profile: dict, feedback: str = "(none)") -> dict:
+    """The sentences the model writes for the email: subject, opening and closing. The facts, the greeting and the
+    sign-off are added by the code (cv/email.py), never by this call."""
     prompt = render(
-        "application_email.v2",
+        "application_email.v3",
         field=profile["field"],
         level=profile["level"],
-        cv_summary=cv_summary,
         job_title=job_title,
         feedback=feedback,
     )
@@ -73,5 +74,5 @@ async def generate_application_email(job_title: str, cv_summary: str, profile: d
     try:
         email = await complete_structured(prompt, ApplicationEmailOutput)
     except ExternalServiceError:
-        return {"subject": fallback_subject, "body": ""}
-    return {"subject": email.subject or fallback_subject, "body": email.body}
+        return {"subject": fallback_subject, "opening": "", "closing": ""}
+    return {"subject": email.subject or fallback_subject, "opening": email.opening, "closing": email.closing}

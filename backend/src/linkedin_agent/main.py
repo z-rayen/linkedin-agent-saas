@@ -27,7 +27,7 @@ from .cv.compile import ensure_tectonic_at_startup
 from .infra.checkpoint import checkpointer_lifespan
 from .infra.embeddings import get_embedder
 from .routers import agent, applications, auth, content, engage, oauth, profile, runs, watch
-from .services import preparations, research_runs, retention
+from .services import preparations, research_runs, retention, watch_runs
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -68,6 +68,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # A restart must not leave a preparation stuck: stale runs are resumed from their checkpoint or failed.
         await preparations.recover_interrupted()
         await research_runs.recover_interrupted()
+        await watch_runs.recover_interrupted()
         purge = asyncio.create_task(retention.purge_forever())  # retention: once now, then periodically
         try:
             yield

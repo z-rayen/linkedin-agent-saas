@@ -96,7 +96,7 @@ def local_day_start_utc(now_utc: datetime, tz_name: str) -> datetime:
 def company_key(recipient_email: str, free_mail_domains: Iterable[str]) -> str:
     """Identifier used to detect 'same company' for the sending policy.
 
-    The recipient's domain identifies the employer (jobs@acme.com -> acme.com). Free-mail
+    The recipient's domain identifies the employer (jobs@acme.example -> acme.example). Free-mail
     domains identify a person, not a company, so for them the full address is used instead.
     Company names typed by users or scraped from pages are deliberately NOT used: they are unreliable.
     """

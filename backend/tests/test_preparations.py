@@ -31,7 +31,7 @@ SAMPLE = json.loads(
 GROUNDED = {
     "lines": [{"section": "experience", "text": "Built a document question-answering service", "source_ids": ["exp-1"]}]
 }
-JOB = {"job_title": "ML Intern", "job_text": "We need Python and FastAPI.", "recipient_email": "hr@acme.com"}
+JOB = {"job_title": "ML Intern", "job_text": "We need Python and FastAPI.", "recipient_email": "hr@acme.example"}
 
 
 @pytest.fixture
@@ -308,8 +308,8 @@ class _Deps:
 
             return TailoredCV.model_validate(GROUNDED)
 
-        async def draft(title: str, summary: str, feedback: str) -> dict[str, str]:
-            return {"subject": "Application", "body": "Hello."}
+        async def draft(title: str, feedback: str) -> dict[str, str]:
+            return {"subject": "Application", "opening": "Hello.", "closing": "Thank you."}
 
         async def persist(state: Any) -> int:
             persisted.append(dict(state))
@@ -337,6 +337,7 @@ class _Deps:
             persist=persist,
             on_step=on_step,
             max_revisions=2,
+            email_max_facts=3,
         )
 
 
@@ -354,7 +355,7 @@ def test_the_review_pause_survives_a_restart_of_the_checkpointer(client: TestCli
         "user_id": 1,
         "job_title": "ML Intern",
         "job_text": "We need Python.",
-        "recipient_email": "hr@acme.com",
+        "recipient_email": "hr@acme.example",
         "company": None,
         "master_json": json.dumps(SAMPLE),
     }

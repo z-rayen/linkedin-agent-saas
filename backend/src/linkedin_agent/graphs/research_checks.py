@@ -289,6 +289,46 @@ def title_phrases_in(statement: str) -> list[str]:
     return list(phrases.values())
 
 
+# A company written in lowercase ("at capgemini", "chez société générale") is found by the word that introduces it:
+# the name is the one or two words after the preposition, when they are not common words. It is then an entity like a
+# capitalised one, so the cited sources must contain it (case and accents aside).
+COMPANY_INTRODUCER = re.compile(
+    r"(?<!\w)(?:at|by|chez|par)\s+([^\W\d_][\w&'’.-]*)(?:\s+([^\W\d_][\w&'’.-]*))?",
+    re.IGNORECASE,
+)
+
+
+def lowercase_companies_in(statement: str) -> list[str]:
+    """Names written in lowercase after a company-introducing word, as written. Common words are not names."""
+    found: list[str] = []
+    text = CITATION_MARKER.sub(" ", statement)
+    for match in COMPANY_INTRODUCER.finditer(text):
+        first, second = match.group(1), match.group(2)
+        if first[0].isupper() or first.isdigit() or _is_common(first):
+            continue  # capitalised names are already entities; common words and numbers are not names
+        name = first
+        if second is not None and not _is_common(second):
+            name = f"{first} {second}"
+        found.append(name)
+    return list(dict.fromkeys(found))
+
+
+# Lowercase words that follow "at" or "by" in ordinary phrases ("at least", "by default"): never company names.
+PHRASE_WORDS: frozenset[str] = frozenset(
+    fold(word)
+    for word in (
+        "least", "most", "scale", "all", "once", "first", "present", "large", "default", "then", "hand", "design",
+        "times", "random", "example", "its", "his", "her", "their", "our", "your", "one", "two", "night", "home",
+        "best", "risk", "work", "best", "minimum", "maximum", "some", "various", "several", "many",
+    )
+)  # fmt: skip
+
+
+def _is_common(word: str) -> bool:
+    key = fold(word)
+    return key in ENTITY_COMMON or key in NON_CLAIM_FOLDED or key in TITLE_STOP_WORDS or key in PHRASE_WORDS
+
+
 def entities_in(statement: str) -> list[str]:
     """The distinct capitalised terms and job titles of a statement that its cited sources must contain, as written."""
     seen: dict[str, str] = {}
@@ -299,6 +339,8 @@ def entities_in(statement: str) -> list[str]:
         seen.setdefault(key, term)
     for title in title_phrases_in(statement):
         seen.setdefault(fold(title), title)
+    for company in lowercase_companies_in(statement):
+        seen.setdefault(fold(company), company)
     return list(seen.values())
 
 

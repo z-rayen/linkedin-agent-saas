@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -11,12 +13,16 @@ from ..services.rag_service import add_knowledge, delete_knowledge, list_knowled
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 
+def _text_or(value: str | None, fallback: str) -> str:
+    return value if value and value.strip() else fallback
+
+
 @router.get("", response_model=schemas.ProfileConfigOut)
 def get_profile(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    settings = get_settings()
     row = db.query(models.ProfileConfig).filter(models.ProfileConfig.user_id == current_user.id).first()
     if not row:
-        # Defaults until the user saves a profile (see core.settings)
-        settings = get_settings()
+        # Defaults until the user saves a profile (see core.settings).
         return schemas.ProfileConfigOut(
             field=settings.default_field,
             skills=settings.default_skills,
@@ -25,7 +31,19 @@ def get_profile(db: Session = Depends(get_db), current_user: models.User = Depen
             job_feed_url=settings.default_job_feed_url,
             cert_feed_url=settings.default_cert_feed_url,
         )
-    return row
+    # A row can exist with empty base fields (for example one created when a master CV was saved first).
+    # The base fields then read as the defaults; the optional fields are returned as stored.
+    return schemas.ProfileConfigOut(
+        field=_text_or(row.field, settings.default_field),
+        skills=_text_or(row.skills, settings.default_skills),
+        level=_text_or(row.level, settings.default_level),
+        min_match_score=row.min_match_score if row.min_match_score is not None else settings.default_min_match_score,
+        job_feed_url=row.job_feed_url,
+        cert_feed_url=row.cert_feed_url,
+        regions=row.regions,
+        languages=row.languages,
+        offer_type=row.offer_type,
+    )
 
 
 @router.post("", response_model=schemas.ProfileConfigOut)
@@ -55,6 +73,13 @@ def update_profile(
         )
         db.add(row)
 
+    # The watch preferences change only when they are sent: an older client keeps what is stored.
+    if payload.regions is not None:
+        row.regions = json.dumps(payload.regions)
+    if payload.languages is not None:
+        row.languages = json.dumps(payload.languages)
+    if payload.offer_type is not None:
+        row.offer_type = payload.offer_type
     db.commit()
     db.refresh(row)
     return row

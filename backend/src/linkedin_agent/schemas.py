@@ -1,6 +1,7 @@
+import json
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from .domain.accounts import normalise_address
 
@@ -53,7 +54,23 @@ class ProfileConfigIn(BaseModel):
     min_match_score: int = 70
     job_feed_url: str | None = None
     cert_feed_url: str | None = None
+    # Watch preferences. Omitted (null) means "keep what is stored"; an empty list or string clears it.
+    regions: list[str] | None = Field(default=None, max_length=10)
+    languages: list[str] | None = Field(default=None, max_length=10)
+    offer_type: str | None = Field(default=None, max_length=120)
 
 
 class ProfileConfigOut(ProfileConfigIn):
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("regions", "languages", mode="before")
+    @classmethod
+    def _stored_list(cls, value: object) -> object:
+        """The column holds a JSON list as text; a missing or unreadable value reads as no list."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return None
+            return parsed if isinstance(parsed, list) else None
+        return value

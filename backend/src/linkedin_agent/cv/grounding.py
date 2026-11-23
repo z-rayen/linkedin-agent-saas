@@ -8,6 +8,9 @@ Deterministic on purpose: no model judges the output. A text is checked against 
 4. every technology name appears in the cited facts, in any case, accents folded;
 5. every scope, level or degree claim (led, dirigé, proficient, courant, master) appears in the cited facts;
 6. no unfilled placeholder remains ("[Your Name]", "{company}", "<role>").
+7. in the email, no sentence combines words from two different facts (the facts quoted are verbatim);
+8. scope words ("deploying", "designing", "hands-on", "optimization", "improving user experience") are claims
+   unless a cited fact uses them.
 
 The CV also has mandatory parts that come from the master CV and are never written by the model: a headline, a contact
 email, and at least one education fact. A CV without them cannot be approved.
@@ -23,9 +26,10 @@ and meaning changes that reuse the same words.
 
 import json
 import re
+from collections.abc import Sequence
 
-from .email import without_signature
-from .lexicon import CLAIM_WORDS, NON_CLAIM_FOLDED, TECHNOLOGIES, fold
+from .email import without_fixed_lines
+from .lexicon import CLAIM_WORDS, GENERIC_WORDS, NON_CLAIM_FOLDED, TECHNOLOGIES, fold
 from .models import MasterCV, TailoredCV
 
 # Digits grouped by spaces (regular, no-break, narrow no-break, thin), dots or commas, or a plain number with a decimal.
@@ -34,6 +38,10 @@ NUMBER = re.compile(rf"\d{{1,3}}(?:{GROUPING}\d{{3}})+(?:[.,]\d+)?|\d+(?:[.,]\d+
 CAPITALISED = re.compile(r"\b[A-ZÀ-Ý][\w+#.\-]*[\w+#]\b")
 PLACEHOLDER = re.compile(r"\[[^\]\n]*\]|\{\{?[^}\n]*\}?\}|<[^>\n]{1,80}>")
 MAX_PLACEHOLDER_CHARS = 80
+WORD = re.compile(r"[^\W\d_][\w+#-]*")
+MIN_CONTENT_WORD_LENGTH = 4  # shorter words are never a fact on their own
+MIN_MIXED_WORDS = 2  # a sentence sharing one word with each of two facts is not a mix
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 class GroundingProblem(str):
@@ -133,8 +141,45 @@ def check_text(text: str, cited_text: str, label: str, context_text: str = "") -
     return list(problems.values())
 
 
+def content_words(text: str) -> set[str]:
+    """The words of a text that can identify a fact: folded, long enough, and not generic."""
+    return {
+        word for word in WORD.findall(fold(text)) if len(word) >= MIN_CONTENT_WORD_LENGTH and word not in GENERIC_WORDS
+    }
+
+
+def sentences_of(text: str) -> list[str]:
+    return [part.strip() for part in SENTENCE_END.split(text) if part.strip()]
+
+
+def mixed_sentences(text: str, facts: Sequence[str], label: str, context_text: str = "") -> list[GroundingProblem]:
+    """Sentences that combine words from two different facts.
+
+    A sentence may use several words of one fact, or one word from each of two facts. It may not take its content
+    from two facts at once, because the combination is a claim that no fact makes. A sentence is flagged when its
+    words that appear in the facts are spread over two or more facts and no single fact contains all of them.
+    The job context (title, company) is set aside: it describes the job, not the candidate.
+    """
+    context = content_words(context_text)
+    fact_words = [content_words(fact) - context for fact in facts]
+    known = set().union(*fact_words) if fact_words else set()
+    problems: list[GroundingProblem] = []
+    for sentence in sentences_of(text):
+        matched = (content_words(sentence) - context) & known
+        if len(matched) < MIN_MIXED_WORDS:
+            continue
+        contributing = [words for words in fact_words if words & matched]
+        if len(contributing) < 2 or any(matched <= words for words in fact_words):
+            continue
+        terms = ", ".join(sorted(matched))
+        message = f"{label}: the sentence '{sentence}' combines words from two different facts ({terms}): cite one fact"
+        problems.append(GroundingProblem(message, kind="mixed_facts", location=label, term=terms))
+    return problems
+
+
 def verify_grounding(cv: TailoredCV, master: MasterCV) -> list[GroundingProblem]:
-    """Problems in the tailored CV. Every line must cite facts that support it."""
+    """Problems in the tailored CV. Every line must cite facts that support it. A CV line may cite several facts (a
+    project and the skill it used); the mixing check applies to the email sentences only, see verify_email."""
     facts = master.facts_by_id()
     problems: dict[str, GroundingProblem] = {}
     for index, line in enumerate(cv.lines, start=1):
@@ -146,8 +191,8 @@ def verify_grounding(cv: TailoredCV, master: MasterCV) -> list[GroundingProblem]
                 message, kind="unknown_source", location=label, term=", ".join(unknown)
             )
             continue
-        cited = " ".join(facts[source].text for source in line.source_ids)
-        for problem in check_text(line.text, cited, label):
+        cited_texts = [facts[source].text for source in line.source_ids]
+        for problem in check_text(line.text, " ".join(cited_texts), label):
             problems[problem] = problem
     return list(problems.values())
 
@@ -175,23 +220,32 @@ def verify_cv(cv: TailoredCV, master: MasterCV) -> list[GroundingProblem]:
     return verify_grounding(cv, master) + verify_mandatory(master)
 
 
-def cited_text_of(cv: TailoredCV, master: MasterCV) -> str:
-    """The text of every fact the tailored CV cites. This is what the email may be checked against."""
+def cited_fact_texts(cv: TailoredCV, master: MasterCV) -> list[str]:
+    """The text of every fact the tailored CV cites, each once, in the order of the CV."""
     facts = master.facts_by_id()
     ids = dict.fromkeys(source for line in cv.lines for source in line.source_ids)
-    return " ".join(facts[source].text for source in ids if source in facts)
+    return [facts[source].text for source in ids if source in facts]
+
+
+def cited_text_of(cv: TailoredCV, master: MasterCV) -> str:
+    """The text of every fact the tailored CV cites. This is what the email may be checked against."""
+    return " ".join(cited_fact_texts(cv, master))
 
 
 def verify_email(subject: str, body: str, cv: TailoredCV, master: MasterCV, job_context: str) -> list[GroundingProblem]:
     """Problems in the application email, checked against every fact the tailored CV cites.
 
-    The signature is built by the code from the master CV, so it is not checked as a claim; the body the model wrote is.
-    `job_context` (job title, company) is allowed for proper terms and numbers only.
+    The greeting, the sign-off and the signature are built by the code, so they are not checked as claims; the rest of
+    the body is: the model's sentences and the facts quoted in it. `job_context` (job title, company) is allowed for
+    proper terms and numbers only, and is set aside when the sentences are checked for mixed facts.
     """
-    written = without_signature(body, master)
+    written = without_fixed_lines(body, master)
     email_text = f"{subject}\n{written}"
-    return check_text(email_text, cited_text_of(cv, master), "email body", job_context) + check_links_and_addresses(
-        email_text, master
+    facts = cited_fact_texts(cv, master)
+    return (
+        check_text(email_text, " ".join(facts), "email body", job_context)
+        + mixed_sentences(email_text, facts, "email body", job_context)
+        + check_links_and_addresses(email_text, master)
     )
 
 

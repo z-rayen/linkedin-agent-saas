@@ -23,8 +23,8 @@ def test_image_and_asset_names_are_not_addresses(html: str) -> None:
     "html",
     [
         "contact support@sentry.io for errors",
-        "reply to noreply@acme.com",
-        "donotreply@acme.com",
+        "reply to noreply@acme.example",
+        "donotreply@acme.example",
         "example.com placeholder: you@example.com",
     ],
 )
@@ -33,18 +33,18 @@ def test_system_and_placeholder_addresses_are_not_addresses(html: str) -> None:
 
 
 def test_obfuscated_address_is_not_guessed() -> None:
-    # Only addresses written in full are taken. Reconstructing "jobs [at] acme.com" would be a guess.
-    assert find_application_email("write to jobs [at] acme.com") is None
+    # Only addresses written in full are taken. Reconstructing "jobs [at] acme.example" would be a guess.
+    assert find_application_email("write to jobs [at] acme.example") is None
 
 
 def test_recruitment_address_is_preferred_over_generic_one() -> None:
-    html = "info@acme.com or careers@acme.com"
-    assert find_application_email(html) == "careers@acme.com"
+    html = "info@acme.example or careers@acme.example"
+    assert find_application_email(html) == "careers@acme.example"
 
 
 def test_trailing_punctuation_and_case_are_normalised() -> None:
-    assert find_application_email("Apply to Jobs@Acme.com.") == "jobs@acme.com"
+    assert find_application_email("Apply to Jobs@acme.example.") == "jobs@acme.example"
 
 
 def test_duplicate_addresses_are_reported_once() -> None:
-    assert find_application_email("hr@acme.com ... HR@acme.com") == "hr@acme.com"
+    assert find_application_email("hr@acme.example ... HR@acme.example") == "hr@acme.example"

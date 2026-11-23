@@ -76,9 +76,13 @@ class Fakes:
         )
         return _cv(self.tailor_answers.pop(0) if len(self.tailor_answers) > 1 else self.tailor_answers[0])
 
-    async def draft(self, job_title: str, cv_summary: str, feedback: str) -> dict[str, str]:
+    async def draft(self, job_title: str, feedback: str) -> dict[str, str]:
         self.draft_calls += 1
-        return {"subject": "Application for ML Intern", "body": "Hello, I am interested in the role."}
+        return {
+            "subject": "Application for ML Intern",
+            "opening": "I am interested in the role.",
+            "closing": "I would welcome a conversation.",
+        }
 
     async def persist(self, state: dict[str, Any]) -> int:
         self.persisted.append(dict(state))
@@ -100,6 +104,7 @@ def _deps(fakes: Fakes, max_revisions: int = 2) -> GraphDeps:
         persist=fakes.persist,
         on_step=fakes.on_step,
         max_revisions=max_revisions,
+        email_max_facts=3,
     )
 
 
@@ -109,7 +114,7 @@ def _initial(job_text: str | None = "We need Python and FastAPI.") -> dict[str, 
         "job_title": "ML Intern",
         "job_text": job_text or "",
         "job_url": None if job_text else "https://jobs.example.com/1",
-        "recipient_email": "hr@acme.com",
+        "recipient_email": "hr@acme.example",
         "company": None,
         "master_json": SAMPLE_MASTER,
     }

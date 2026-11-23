@@ -19,12 +19,12 @@ def test_a_blank_recipient_is_refused_instead_of_locking_on_nothing(recipient: s
 @pytest.mark.parametrize("title", ["", "   "])
 def test_a_blank_job_title_is_refused(title: str) -> None:
     with pytest.raises(ValidationFailedError, match="job_title"):
-        lock_key_for(1, "hr@acme.com", title)
+        lock_key_for(1, "hr@acme.example", title)
 
 
 def test_case_and_surrounding_or_repeated_spaces_do_not_change_the_key() -> None:
-    a = lock_key_for(1, " HR@Acme.com ", "ML   Intern")
-    b = lock_key_for(1, "hr@acme.com", "ml intern")
+    a = lock_key_for(1, " HR@acme.example ", "ML   Intern")
+    b = lock_key_for(1, "hr@acme.example", "ml intern")
     assert a == b
 
 
@@ -34,10 +34,10 @@ def test_a_separator_inside_a_value_cannot_make_two_applications_collide() -> No
 
 
 def test_another_user_with_the_same_application_gets_a_different_key() -> None:
-    assert lock_key_for(1, "hr@acme.com", "ML Intern") != lock_key_for(2, "hr@acme.com", "ML Intern")
+    assert lock_key_for(1, "hr@acme.example", "ML Intern") != lock_key_for(2, "hr@acme.example", "ML Intern")
 
 
 def test_the_key_is_a_sha256_hex_digest() -> None:
-    key = lock_key_for(1, "hr@acme.com", "ML Intern")
+    key = lock_key_for(1, "hr@acme.example", "ML Intern")
     assert len(key) == 64
     int(key, 16)  # hexadecimal

@@ -27,6 +27,8 @@ class ApplicationCreate(BaseModel):
     job_url: str | None = Field(default=None, max_length=2000)
     recipient_email: EmailStr
     company: str | None = Field(default=None, max_length=200)
+    # The language of the email, the CV labels and the greeting. Omitted: detected from the job text and the title.
+    language: Literal["fr", "en"] | None = None
 
 
 class ApplicationEdit(BaseModel):

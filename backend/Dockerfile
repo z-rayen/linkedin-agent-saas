@@ -2,12 +2,12 @@
 # Multi-stage build: dependencies are resolved from uv.lock in the builder stage,
 # and the runtime image contains only the virtualenv, the source, the migrations and the pinned Tectonic binary.
 
-ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.13.9
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
-FROM python:${PYTHON_VERSION}-slim AS builder
+# Base images are pinned by digest (python:3.13-slim). Dependabot proposes the newer digests.
+FROM python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS builder
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
@@ -16,7 +16,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-FROM python:${PYTHON_VERSION}-slim AS runtime
+FROM python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
 ARG TARGETARCH
 # Tectonic compiles the tailored CVs. The release is pinned, and its download must match the SHA-256 that GitHub
 # publishes for the asset (checked by docker/install_tectonic.py). The digests below are for version 0.17.0.
