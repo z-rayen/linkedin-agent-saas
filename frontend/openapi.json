@@ -406,6 +406,21 @@
             ],
             "title": "Job Feed Url"
           },
+          "languages": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Languages"
+          },
           "level": {
             "title": "Level",
             "type": "string"
@@ -414,6 +429,33 @@
             "default": 70,
             "title": "Min Match Score",
             "type": "integer"
+          },
+          "offer_type": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Type"
+          },
+          "regions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regions"
           },
           "skills": {
             "title": "Skills",
@@ -456,6 +498,21 @@
             ],
             "title": "Job Feed Url"
           },
+          "languages": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Languages"
+          },
           "level": {
             "title": "Level",
             "type": "string"
@@ -464,6 +521,33 @@
             "default": 70,
             "title": "Min Match Score",
             "type": "integer"
+          },
+          "offer_type": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Type"
+          },
+          "regions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regions"
           },
           "skills": {
             "title": "Skills",
@@ -2323,12 +2407,180 @@
     },
     "/watch/results": {
       "get": {
+        "description": "`kind`: job or cert. `min_score`: 0 to 100. `verified`: true keeps only results whose full page was read. Results judged on a search snippet alone are unverified. The response carries `total` for paging.",
         "operationId": "get_results_watch_results_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "job",
+                    "cert"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verified",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Verified"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Results Watch Results Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The stored results, newest first, with filters and pagination",
+        "tags": [
+          "watch"
+        ]
+      }
+    },
+    "/watch/results/{result_id}": {
+      "delete": {
+        "operationId": "delete_result_watch_results__result_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "title": "Result Id",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete one stored result of the caller",
+        "tags": [
+          "watch"
+        ]
+      }
+    },
+    "/watch/runs": {
+      "post": {
+        "description": "Accepts no body. The search queries come from the profile (regions, languages, offer type) and the configured templates. Returns 202 with a `run_id` and `status: queued` at once. Follow it with `GET /watch/runs/{run_id}` or the progress stream. A 409 means a watch is already running for this account.",
+        "operationId": "start_watch_watch_runs_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Watch Watch Runs Post",
+                  "type": "object"
+                }
               }
             },
             "description": "Successful Response"
@@ -2339,7 +2591,56 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Results",
+        "summary": "Start a watch run (asynchronous)",
+        "tags": [
+          "watch"
+        ]
+      }
+    },
+    "/watch/runs/{run_id}": {
+      "get": {
+        "operationId": "get_watch_run_watch_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Watch Run Watch Runs  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Status and result of a watch run",
         "tags": [
           "watch"
         ]

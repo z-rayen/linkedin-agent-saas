@@ -59,12 +59,16 @@ export function SendSection({ detail, mode }: Props) {
               spellCheck={false}
               value={typed}
               aria-describedby={hintId}
+              onPaste={(event) => {
+                // The address must be typed from memory: pasting would let the page's own address be copied in.
+                event.preventDefault();
+              }}
               onChange={(event) => {
                 setTyped(event.target.value);
               }}
             />
             <p id={hintId} className="hint">
-              {t("send.confirmHint", { address: detail.recipient_email || NO_VALUE })}
+              {t("send.confirmHint")}
             </p>
           </div>
           <div className="actions">

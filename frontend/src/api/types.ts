@@ -1,5 +1,10 @@
 /** Response and request shapes used by the frontend. Checked against the backend's OpenAPI in contract.test.ts. */
 import type { Problem } from "./errors";
+import type { components } from "./schema.gen";
+
+/** Request bodies are taken from the generated OpenAPI types: a change of the backend that they do not match fails
+ * the type check, not a request at runtime. */
+type Schema<Name extends keyof components["schemas"]> = components["schemas"][Name];
 
 export type ApplicationStatus =
   "prepared" | "approved" | "sending" | "needs_verification" | "sent" | "failed" | "replied";
@@ -60,19 +65,11 @@ export interface PreparationStatus {
   };
 }
 
-export interface ApplicationCreateBody {
-  readonly job_title: string;
-  readonly job_text?: string;
-  readonly job_url?: string;
-  readonly recipient_email: string;
-  readonly company?: string;
-}
+export type ApplicationCreateBody = Schema<"ApplicationCreate">;
 
-export interface ApplicationEditBody {
-  readonly subject?: string;
-  readonly body?: string;
-  readonly recipient_email?: string;
-}
+export type ApplicationEditBody = Schema<"ApplicationEdit">;
+
+export type ProfileConfigBody = Schema<"ProfileConfigIn">;
 
 export interface SendResponse {
   readonly status: ApplicationStatus;
@@ -158,20 +155,14 @@ export interface ResearchStart {
   readonly status: ResearchStatus;
 }
 
-export interface ProfileConfig {
-  readonly field: string;
-  readonly skills: string;
-  readonly level: string;
-  readonly min_match_score: number;
-  readonly job_feed_url: string | null;
-  readonly cert_feed_url: string | null;
-}
-
+/** The profile as the server returns it (watch preferences included). Derived from the generated schema. */
+export type ProfileConfig = Schema<"ProfileConfigOut">;
 export interface KnowledgeItem {
   readonly id: number;
   readonly content: string;
 }
 
+/** A stored watch result. `unverified` is true when it was judged on the search snippet, not on the full page. */
 export interface WatchResult {
   readonly id: number;
   readonly type: "job" | "cert" | "other";
@@ -180,6 +171,43 @@ export interface WatchResult {
   readonly match_score: number;
   readonly justification: string | null;
   readonly cover_letter: string | null;
+  readonly company: string | null;
+  readonly job_title: string | null;
+  readonly fetched: boolean;
+  readonly unverified: boolean;
+  readonly created_at: string | null;
+}
+
+export interface WatchResultPage {
+  readonly items: readonly WatchResult[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export interface WatchRunStart {
+  readonly run_id: string;
+  readonly status: RunStatus;
+}
+
+/** A watch run as the server reports it: the same shape as the other background runs, without a research result. */
+export interface WatchRun {
+  readonly run_id: string;
+  readonly status: RunStatus;
+  readonly step: string | null;
+  readonly error: string | null;
+  readonly stalled: boolean;
+  readonly result: unknown;
+}
+
+export type WatchKind = "job" | "cert";
+
+export interface WatchResultsQuery {
+  readonly kind?: WatchKind;
+  readonly minScore?: number;
+  readonly verified?: boolean;
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export type ConnectionStatus = "connected" | "expired" | "not_connected";

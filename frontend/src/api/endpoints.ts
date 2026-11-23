@@ -15,13 +15,17 @@ import type {
   TokenResponse,
   ProfileConfig,
   KnowledgeItem,
-  WatchResult,
   Connection,
   Provider,
   ContentItem,
   ResearchRun,
   ResearchStart,
   ProviderRevocation,
+  ProfileConfigBody,
+  WatchResultPage,
+  WatchResultsQuery,
+  WatchRun,
+  WatchRunStart,
 } from "./types";
 
 const applicationPath = (id: number): string => `/applications/${String(id)}`;
@@ -109,7 +113,7 @@ export const endpoints = {
   getProfile: (signal?: AbortSignal) =>
     apiRequest<ProfileConfig>("/profile", signal ? { signal } : {}),
 
-  saveProfile: (body: ProfileConfig) =>
+  saveProfile: (body: ProfileConfigBody) =>
     apiRequest<ProfileConfig>("/profile", { method: "POST", body }),
 
   listKnowledge: (signal?: AbortSignal) =>
@@ -121,8 +125,27 @@ export const endpoints = {
   deleteKnowledge: (id: number) =>
     apiRequest<{ status: string }>(`/profile/knowledge/${String(id)}`, { method: "DELETE" }),
 
-  watchResults: (signal?: AbortSignal) =>
-    apiRequest<WatchResult[]>("/watch/results", signal ? { signal } : {}),
+  startWatchRun: () => apiRequest<WatchRunStart>("/watch/runs", { method: "POST" }),
+
+  getWatchRun: (runId: string, signal?: AbortSignal) =>
+    apiRequest<WatchRun>(`/watch/runs/${encodeURIComponent(runId)}`, signal ? { signal } : {}),
+
+  watchResults: (query: WatchResultsQuery, signal?: AbortSignal) => {
+    const params = new URLSearchParams({
+      limit: String(query.limit),
+      offset: String(query.offset),
+    });
+    if (query.kind !== undefined) params.set("kind", query.kind);
+    if (query.minScore !== undefined) params.set("min_score", String(query.minScore));
+    if (query.verified !== undefined) params.set("verified", String(query.verified));
+    return apiRequest<WatchResultPage>(
+      `/watch/results?${params.toString()}`,
+      signal ? { signal } : {},
+    );
+  },
+
+  deleteWatchResult: (id: number) =>
+    apiRequest<unknown>(`/watch/results/${String(id)}`, { method: "DELETE" }),
 
   /** Disconnects a provider: the stored token is deleted, and revoked at the provider when it can be. */
   disconnect: (provider: Provider) =>

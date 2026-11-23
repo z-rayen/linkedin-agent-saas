@@ -3,7 +3,7 @@ import { useEffect, useId, useState, type SyntheticEvent } from "react";
 import { endpoints } from "../../api/endpoints";
 import { ApiErrorMessage } from "../../components/ApiErrorMessage";
 import { Banner } from "../../components/Banner";
-import { Loading } from "../../components/Loading";
+import { RunProgress } from "../../components/RunProgress";
 import { followRun } from "../../api/runFollow";
 import type { ResearchLink, ResearchResult, ResearchRun } from "../../api/types";
 import { useI18n, type Translate } from "../../i18n/I18nProvider";
@@ -143,13 +143,15 @@ function ResearchTurn({ turn }: { readonly turn: Turn }) {
 
       {failure === "notFound" ? <Banner tone="danger">{t("research.notFound")}</Banner> : null}
       {failure === "failed" ? <Banner tone="danger">{t("research.failed")}</Banner> : null}
-      {run?.stalled && run.status !== "done" ? (
-        <Banner tone="warning">{t("research.stalled")}</Banner>
-      ) : null}
-
       {failure === null && run?.status !== "done" ? (
         <div>
-          <Loading label={run === null ? t("research.queued") : t("research.running")} />
+          <RunProgress
+            statusText={run === null ? t("research.queued") : t("research.running")}
+            stepText=""
+            elapsedLabel={(time) => t("common.elapsed", { time })}
+            stalled={run?.stalled === true}
+            stalledText={t("research.stalled")}
+          />
           <p className="hint">{t("research.followingHint")}</p>
         </div>
       ) : null}

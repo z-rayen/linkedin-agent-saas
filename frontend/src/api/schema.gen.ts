@@ -645,8 +645,65 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Results */
+        /**
+         * The stored results, newest first, with filters and pagination
+         * @description `kind`: job or cert. `min_score`: 0 to 100. `verified`: true keeps only results whose full page was read. Results judged on a search snippet alone are unverified. The response carries `total` for paging.
+         */
         get: operations["get_results_watch_results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/watch/results/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one stored result of the caller */
+        delete: operations["delete_result_watch_results__result_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/watch/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a watch run (asynchronous)
+         * @description Accepts no body. The search queries come from the profile (regions, languages, offer type) and the configured templates. Returns 202 with a `run_id` and `status: queued` at once. Follow it with `GET /watch/runs/{run_id}` or the progress stream. A 409 means a watch is already running for this account.
+         */
+        post: operations["start_watch_watch_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/watch/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status and result of a watch run */
+        get: operations["get_watch_run_watch_runs__run_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -818,6 +875,8 @@ export interface components {
             field: string;
             /** Job Feed Url */
             job_feed_url?: string | null;
+            /** Languages */
+            languages?: string[] | null;
             /** Level */
             level: string;
             /**
@@ -825,6 +884,10 @@ export interface components {
              * @default 70
              */
             min_match_score: number;
+            /** Offer Type */
+            offer_type?: string | null;
+            /** Regions */
+            regions?: string[] | null;
             /** Skills */
             skills: string;
         };
@@ -836,6 +899,8 @@ export interface components {
             field: string;
             /** Job Feed Url */
             job_feed_url?: string | null;
+            /** Languages */
+            languages?: string[] | null;
             /** Level */
             level: string;
             /**
@@ -843,6 +908,10 @@ export interface components {
              * @default 70
              */
             min_match_score: number;
+            /** Offer Type */
+            offer_type?: string | null;
+            /** Regions */
+            regions?: string[] | null;
             /** Skills */
             skills: string;
         };
@@ -2099,7 +2168,13 @@ export interface operations {
     };
     get_results_watch_results_get: {
         parameters: {
-            query?: never;
+            query?: {
+                kind?: ("job" | "cert") | null;
+                min_score?: number | null;
+                verified?: boolean | null;
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2112,7 +2187,104 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json; charset=utf-8": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_result_watch_results__result_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                result_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json; charset=utf-8": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_watch_watch_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_watch_run_watch_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json; charset=utf-8": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

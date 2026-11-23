@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState, type SyntheticEvent } from "react";
 import { endpoints } from "../../api/endpoints";
-import type { ProfileConfig } from "../../api/types";
+import type { ProfileConfig, ProfileConfigBody } from "../../api/types";
 import { ApiErrorMessage } from "../../components/ApiErrorMessage";
 import { Banner } from "../../components/Banner";
 import { Loading } from "../../components/Loading";
@@ -19,6 +19,19 @@ interface FormValues {
   readonly minScore: string;
   readonly jobFeed: string;
   readonly certFeed: string;
+  readonly regions: string;
+  readonly languages: string;
+  readonly offerType: string;
+}
+
+/** A comma-separated field becomes a list: blanks and repeats are dropped, order is kept. */
+function listOf(value: string): string[] {
+  const seen = new Set<string>();
+  for (const part of value.split(",")) {
+    const item = part.trim();
+    if (item !== "") seen.add(item);
+  }
+  return [...seen];
 }
 
 function valuesOf(profile: ProfileConfig): FormValues {
@@ -29,12 +42,18 @@ function valuesOf(profile: ProfileConfig): FormValues {
     minScore: String(profile.min_match_score),
     jobFeed: profile.job_feed_url ?? "",
     certFeed: profile.cert_feed_url ?? "",
+    regions: (profile.regions ?? []).join(", "),
+    languages: (profile.languages ?? []).join(", "),
+    offerType: profile.offer_type ?? "",
   };
 }
 
 /** Empty feed fields are sent as null: "no feed", not an empty address. */
-function bodyOf(values: FormValues): ProfileConfig {
+function bodyOf(values: FormValues): ProfileConfigBody {
   return {
+    regions: listOf(values.regions),
+    languages: listOf(values.languages),
+    offer_type: values.offerType.trim() === "" ? null : values.offerType.trim(),
     field: values.field.trim(),
     skills: values.skills.trim(),
     level: values.level.trim(),
@@ -89,6 +108,9 @@ function ProfileForm({ profile }: { readonly profile: ProfileConfig }) {
     minScore: useId(),
     jobFeed: useId(),
     certFeed: useId(),
+    regions: useId(),
+    languages: useId(),
+    offerType: useId(),
   };
   const [values, setValues] = useState<FormValues>(() => valuesOf(profile));
   const [scoreInvalid, setScoreInvalid] = useState(false);
@@ -208,6 +230,54 @@ function ProfileForm({ profile }: { readonly profile: ProfileConfig }) {
             update("certFeed", event.target.value);
           }}
         />
+      </div>
+
+      <div className="field">
+        <label htmlFor={ids.regions}>{t("profile.regionsLabel")}</label>
+        <input
+          id={ids.regions}
+          className="input"
+          value={values.regions}
+          aria-describedby={`${ids.regions}-hint`}
+          onChange={(event) => {
+            update("regions", event.target.value);
+          }}
+        />
+        <p id={`${ids.regions}-hint`} className="hint">
+          {t("profile.regionsHelp")}
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor={ids.languages}>{t("profile.languagesLabel")}</label>
+        <input
+          id={ids.languages}
+          className="input"
+          value={values.languages}
+          aria-describedby={`${ids.languages}-hint`}
+          onChange={(event) => {
+            update("languages", event.target.value);
+          }}
+        />
+        <p id={`${ids.languages}-hint`} className="hint">
+          {t("profile.languagesHelp")}
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor={ids.offerType}>{t("profile.offerTypeLabel")}</label>
+        <input
+          id={ids.offerType}
+          className="input"
+          value={values.offerType}
+          aria-describedby={`${ids.offerType}-hint`}
+          onChange={(event) => {
+            update("offerType", event.target.value);
+          }}
+        />
+        <p id={`${ids.offerType}-hint`} className="hint">
+          {t("profile.offerTypeHelp")}
+        </p>
       </div>
 
       <ApiErrorMessage error={save.error} />

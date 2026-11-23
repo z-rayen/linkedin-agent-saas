@@ -1,46 +1,37 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { endpoints } from "../../api/endpoints";
-import { ApiErrorMessage } from "../../components/ApiErrorMessage";
+import type { PreparationStatus } from "../../api/types";
 import { Banner } from "../../components/Banner";
 import { Loading } from "../../components/Loading";
+import { RunProgress } from "../../components/RunProgress";
 import { useI18n } from "../../i18n/I18nProvider";
-import { applicationKeys } from "./keys";
-import {
-  POLL_INTERVAL_MS,
-  TICK_INTERVAL_MS,
-  formatElapsed,
-  isKnownStep,
-  isTerminalRun,
-} from "./preparation";
+import { useFollowedRun } from "../shared/useFollowedRun";
+import { isKnownStep } from "./preparation";
+
+/** Preparations end when the application needs the user, or when the workflow closes or fails. */
+const PREPARATION_TERMINAL: readonly string[] = ["awaiting_review", "closed", "failed"];
+
+const fetchPreparation = (runId: string): Promise<PreparationStatus> =>
+  endpoints.getPreparation(runId);
+const isPreparationTerminal = (status: string): boolean => PREPARATION_TERMINAL.includes(status);
 
 /** Follows a background preparation until it needs the user. Leaving the page does not stop the run. */
 export function PreparationPage() {
+  const { runId = "" } = useParams();
+  // Keyed by run: a different run starts from an empty state, never from the previous one's status.
+  return <PreparationRun key={runId} runId={runId} />;
+}
+
+function PreparationRun({ runId }: { readonly runId: string }) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const { runId = "" } = useParams();
-  const [startedAt] = useState(() => Date.now());
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, TICK_INTERVAL_MS);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  const query = useQuery({
-    queryKey: applicationKeys.preparation(runId),
-    queryFn: ({ signal }) => endpoints.getPreparation(runId, signal),
-    enabled: runId !== "",
-    refetchInterval: (current) =>
-      isTerminalRun(current.state.data?.status) ? false : POLL_INTERVAL_MS,
-  });
-
-  const status = query.data;
+  const followed = useFollowedRun<PreparationStatus>(
+    runId,
+    fetchPreparation,
+    isPreparationTerminal,
+  );
+  const status = followed.run;
 
   useEffect(() => {
     if (status?.status === "awaiting_review" && status.application_id !== null) {
@@ -48,8 +39,9 @@ export function PreparationPage() {
     }
   }, [status, navigate]);
 
-  if (query.isError) return <ApiErrorMessage error={query.error} />;
-  if (status === undefined) return <Loading />;
+  if (followed.failure !== null)
+    return <Banner tone="danger">{t("progress.failedGeneric")}</Banner>;
+  if (status === null) return <Loading />;
 
   const stepText =
     status.step !== null && isKnownStep(status.step)
@@ -59,14 +51,13 @@ export function PreparationPage() {
   return (
     <section>
       <h1>{t("progress.title")}</h1>
-      <p>{status.status === "queued" ? t("progress.queued") : t("progress.running")}</p>
-      <p role="status" aria-live="polite">
-        <strong>{t("progress.stepLabel")}: </strong>
-        {stepText}
-      </p>
-      <p className="muted">{t("common.elapsed", { time: formatElapsed(now - startedAt) })}</p>
-
-      {status.stalled ? <Banner tone="warning">{t("progress.stalled")}</Banner> : null}
+      <RunProgress
+        statusText={status.status === "queued" ? t("progress.queued") : t("progress.running")}
+        stepText={stepText}
+        elapsedLabel={(time) => t("common.elapsed", { time })}
+        stalled={status.stalled}
+        stalledText={t("progress.stalled")}
+      />
 
       {status.status === "failed" ? (
         <Banner tone="danger">

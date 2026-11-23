@@ -1,3 +1,4 @@
 export const watchKeys = {
-  results: ["watch-results"] as const,
+  all: ["watch-results"] as const,
+  results: (query: object) => ["watch-results", query] as const,
 };

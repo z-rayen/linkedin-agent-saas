@@ -1,0 +1,8 @@
+.progress {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.progress p {
+  margin: 0;
+}
