@@ -7,7 +7,7 @@ ARG UV_VERSION=0.13.9
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
 # Base images are pinned by digest (python:3.13-slim). Dependabot proposes the newer digests.
-FROM python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS builder
+FROM python@sha256:46837ed3105db0029b6d656816185c6258e3b39690532fb782428e0a5fd76182 AS builder
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
@@ -16,7 +16,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-FROM python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
+FROM python@sha256:46837ed3105db0029b6d656816185c6258e3b39690532fb782428e0a5fd76182 AS runtime
 ARG TARGETARCH
 # Tectonic compiles the tailored CVs. The release is pinned, and its download must match the SHA-256 that GitHub
 # publishes for the asset (checked by docker/install_tectonic.py). The digests below are for version 0.17.0.
