@@ -131,3 +131,25 @@ jobs:
         run: docker build -t linkedin-agent-api:ci ./backend
       - name: Build frontend image
         run: docker build -t linkedin-agent-web:ci ./frontend
+
+  audit:
+    # Secrets and personal data in the files that would be committed (the same script as the pre-commit hook).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python scripts/audit_tracked.py
+
+  compose:
+    # The stack's configuration is valid, with the variables it requires. The values are CI-only and empty files.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the env files compose reads (empty: the configuration is checked, not run)
+        run: touch backend/.env .env
+      - name: Validate the compose file
+        run: docker compose config --quiet
+        env:
+          POSTGRES_PASSWORD: ci-only-password

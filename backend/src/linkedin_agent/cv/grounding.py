@@ -207,6 +207,8 @@ def verify_mandatory(master: MasterCV) -> list[GroundingProblem]:
         missing.append(("contact email is empty", "contact email"))
     if not any(fact.kind == "education" for fact in master.facts):
         missing.append(("no education fact", "education"))
+    if not any(fact.kind == "summary" for fact in master.facts):
+        missing.append(("no summary fact", "summary"))
     return [
         GroundingProblem(
             f"{label}: {reason}; the CV cannot be approved without it", kind="mandatory", location=label, term=term

@@ -13,6 +13,10 @@ data/private/
 !docs/**/*.pdf
 !backend/tests/fixtures/**/*.pdf
 
+# Test and coverage reports
+coverage.xml
+frontend/coverage/
+.tox/
 # Python
 __pycache__/
 *.py[cod]
@@ -32,10 +36,15 @@ node_modules/
 frontend/dist/
 frontend/coverage/
 
-# Databases and volumes
+# Databases, volumes and backups (a dump contains personal data)
 *.db
 *.sqlite3
 pgdata/
+*.dump
+*.sql
+*.sql.gz
+*.backup
+backups/
 
 # Editors and OS
 .vscode/

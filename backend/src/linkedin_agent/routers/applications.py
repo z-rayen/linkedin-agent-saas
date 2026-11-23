@@ -61,6 +61,7 @@ def _out(application: models.Application) -> dict[str, Any]:
         "company": application.company,
         "company_key": application.company_key,
         "job_title": application.job_title,
+        "language": application.language,
         "recipient_email": application.recipient_email,
         "subject": application.subject,
         "body": application.body,

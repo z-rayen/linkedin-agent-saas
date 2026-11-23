@@ -1,10 +1,262 @@
 # LinkedIn Agent
 
-A self-hosted assistant for job seekers: it finds opportunities, tailors a CV to each one, drafts the
-application email, and sends it only after you approve it. Everything is grounded: a claim in the CV or the
-email must trace back to a fact in your master CV.
+A self-hosted assistant for a job search. It looks for job offers and certifications that fit your profile, prepares an
+application for each one (a tailored CV section and a draft email), and sends the email only after you have read it and
+approved it. Every claim in a CV or an email must trace back to a fact in your own master CV or knowledge base.
 
-Status: prototype in active development (see `docs/ARCHITECTURE.md` for the architecture and the roadmap).
+**What it is:** a single-user application you run on your own machine or server. It has a FastAPI backend with a
+PostgreSQL database (pgvector), a React web interface, background runs with live progress, and tests for the rules that
+protect you.
+
+**What it is not:** a job-board scraper, a bot, a mass-mailing tool, or a LinkedIn automation. It does not log in to job
+boards or other sites for you, and it never posts, comments or connects on LinkedIn by itself.
+
+Status: pre-release. The design and the roadmap are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The licence is not
+chosen yet (see [docs/decisions/license.md](docs/decisions/license.md)).
+
+## Screenshots
+
+*Placeholders, to be replaced before publication.*
+
+| Screen | Picture |
+| --- | --- |
+| Application review (email, CV lines, grounding problems) | `docs/screenshots/review.png` (to add) |
+| Watch results with the verified flag | `docs/screenshots/watch.png` (to add) |
+| Research answer with its sources | `docs/screenshots/research.png` (to add) |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    browser[Browser] --> web["web: nginx serving the React build"]
+    web -- "/api" --> api["api: FastAPI and background runs"]
+    api --> db[("PostgreSQL 16 with pgvector")]
+    api --> llm["LLM provider (Groq by default)"]
+    api --> search["Search provider (Serper)"]
+    api --> smtp["Your SMTP server"]
+    api --> linkedin["LinkedIn API (official, publish only)"]
+    api --> github["GitHub API (OAuth, repositories)"]
+    api --> tectonic["Tectonic: compiles the CV PDF"]
+```
+
+The API is the only component that calls the outside world. The web interface reaches the API through one origin
+(`/api`), so the browser needs no CORS configuration. In Docker Compose the database and the API are published on
+`127.0.0.1` only.
+
+## Prerequisites
+
+| Tool | Version | Needed for |
+| --- | --- | --- |
+| Git | any recent | cloning the repository |
+| Python | 3.13 (3.11 or later) | the backend |
+| [uv](https://docs.astral.sh/uv/) | 0.13 or later | installing and running the backend |
+| Node.js | 26 | the frontend |
+| Docker Desktop (Windows, macOS) or Docker Engine (Linux) | recent | the database, and the full stack |
+| Tectonic | 0.17.0 | compiling the CV PDF. The API refuses to start without it unless `TECTONIC_REQUIRED=false` |
+
+Check the tools with `git --version`, `python --version`, `uv --version`, `node --version` and `docker --version`.
+
+## Quickstart
+
+The quickstart runs the database in Docker and the backend and the frontend on your machine, in three terminals.
+
+### 1. The two environment files
+
+Copy the templates and fill in the values. The next section says where to get each key.
+
+| File | Read by | Copy from |
+| --- | --- | --- |
+| `.env` (repository root) | Docker Compose only | `.env.example` |
+| `backend/.env` | the API | `backend/.env.example` |
+
+Both are gitignored. Set the same database password in both: `POSTGRES_PASSWORD` in the root file, and the password in
+`DATABASE_URL` of `backend/.env`.
+
+### 2a. Windows (PowerShell)
+
+```powershell
+# Terminal 1: the database
+Copy-Item .env.example .env          # then set POSTGRES_PASSWORD
+docker compose up -d db
+
+# Terminal 2: the backend
+cd backend
+Copy-Item .env.example .env          # then fill in SECRET_KEY, TOKEN_ENCRYPTION_KEY, the keys and DATABASE_URL
+uv sync --frozen
+uv run alembic upgrade head
+uv run uvicorn linkedin_agent.main:app --reload --app-dir src
+
+# Terminal 3: the frontend
+cd frontend
+Copy-Item .env.example .env          # optional: the defaults work
+npm ci
+npm run dev
+```
+
+### 2b. Linux and macOS
+
+```bash
+# Terminal 1: the database
+cp .env.example .env                 # then set POSTGRES_PASSWORD
+docker compose up -d db
+
+# Terminal 2: the backend
+cd backend
+cp .env.example .env                 # then fill in SECRET_KEY, TOKEN_ENCRYPTION_KEY, the keys and DATABASE_URL
+uv sync --frozen
+uv run alembic upgrade head
+uv run uvicorn linkedin_agent.main:app --reload --app-dir src
+
+# Terminal 3: the frontend
+cd frontend
+cp .env.example .env                 # optional: the defaults work
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173`, create an account, paste your master CV on the Master CV page, then start an application.
+
+`FRONTEND_ORIGIN` in `backend/.env` must be the address you open in the browser (`http://localhost:5173` for the commands
+above). The template ships another value, so change it.
+
+## Getting the keys
+
+Keep every key in the two `.env` files. Never put one in a committed file, a screenshot or an issue.
+
+- **Groq (LLM):** create an account at <https://console.groq.com>, create an API key, and set `GROQ_API_KEY`. The free
+  tier allows about 8000 tokens per minute, and the application is designed to stay within that budget.
+- **Serper (web search):** create an account at <https://serper.dev>, copy the key from the dashboard, and set
+  `SERPER_API_KEY`.
+- **LinkedIn (publishing, optional):** create an app at <https://www.linkedin.com/developers/>. Add the products
+  *Sign In with LinkedIn using OpenID Connect* (scopes `openid profile email`) and *Share on LinkedIn* (scope
+  `w_member_social`). In the Auth settings, add the redirect URL `http://localhost:8000/oauth/linkedin/callback`. Set
+  `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` and `LINKEDIN_REDIRECT_URI`. The application publishes only the posts
+  you approve on the Content page.
+- **GitHub (repositories, optional):** Settings, Developer settings, OAuth Apps, New OAuth App. Set the callback URL to
+  `http://localhost:8000/oauth/github/callback`. Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and
+  `GITHUB_REDIRECT_URI`. The application asks for the scopes `read:user` and `repo`. You can disconnect the account from
+  the Connections page, which also revokes the grant at GitHub.
+- **SMTP (sending, optional):** your mail provider's host, port and credentials, and `SMTP_FROM_ADDRESS`. If the provider
+  offers an app password, use it instead of your account password. Keep `MAIL_DRY_RUN=true` until a test message to an
+  address you own has arrived (`MAIL_REDIRECT_TO`).
+- **Secrets you generate yourself:** `SECRET_KEY` (a long random string) and `TOKEN_ENCRYPTION_KEY` (a Fernet key). The
+  command to create the Fernet key is in `backend/.env.example`. Keep it safe: losing it makes stored connections
+  unreadable.
+
+## Running the tests
+
+```bash
+# Backend. The default suite uses a dedicated test database (TEST_DATABASE_URL), never the development one.
+cd backend
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pytest -q                     # skips the integration tests
+uv run pytest -q -m integration      # the tests that need the Postgres checkpointer
+
+# Frontend
+cd frontend
+npm run format:check && npm run lint && npm run typecheck
+npm test
+npm run build
+npm run check:types                  # the generated API types match the OpenAPI snapshot
+
+# From the repository root: secrets and personal data in the files that would be committed
+python scripts/audit_tracked.py
+```
+
+The backend tests need a PostgreSQL with pgvector on the URL in `TEST_DATABASE_URL` (default
+`postgresql://test:test@localhost:5433/linkedin_test`). A throwaway container does it:
+
+```bash
+docker run -d --name linkedin-test-pg -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_DB=linkedin_test -p 5433:5432 pgvector/pgvector:pg16
+```
+
+`backend/tests/test_cv_tectonic_integration.py` compiles a real PDF with the Tectonic binary. CI installs the pinned
+binary for it.
+
+## Running the full stack with Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+This starts PostgreSQL, the API and the web interface. Open `http://localhost:8080`. The API is published on
+`127.0.0.1:8000` for direct use. The stack needs both `.env` files, and `POSTGRES_PASSWORD` must be set in the root file.
+Without it, Compose stops and names the variable. Stop with `docker compose down` (the data is kept), or with
+`docker compose down -v`, which also deletes the database volume.
+
+The images are pinned by digest in the Dockerfiles and in `docker-compose.yml`. The API runs as a non-root user, and nginx
+runs unprivileged on port 8080.
+
+## Troubleshooting
+
+**Docker says the engine is not running** (`Cannot connect to the Docker daemon`). Start Docker Desktop (Windows, macOS),
+or `sudo systemctl start docker` (Linux). Then run the command again.
+
+**`password authentication failed for user "linkedin"`.** The PostgreSQL volume keeps the password it was created with.
+Changing `POSTGRES_PASSWORD` later does not change the password inside the volume. Either put the original password back
+in `.env`, or change it inside the database and then set the same value in `.env` and in `DATABASE_URL`:
+
+```bash
+docker compose exec db psql -U linkedin -d linkedin_agent -c "ALTER USER linkedin WITH PASSWORD 'new-password';"
+```
+
+The last resort is `docker compose down -v`, which deletes the database and all its data.
+
+**The API refuses to start and names `TECTONIC_PATH`.** Install Tectonic 0.17.0. Then set `TECTONIC_PATH` in
+`backend/.env` to its full path (on Windows, the path to `tectonic.exe`), or leave it empty to use the `tectonic` found on
+the `PATH`. The Docker image installs Tectonic itself. `TECTONIC_REQUIRED=false` lets the API start without it, but CV
+PDFs are then not produced.
+
+**`node` or `npm` is not found, or has the wrong version.** Install Node 26 from <https://nodejs.org>, or with a version
+manager (`nvm install 26`, `fnm install 26`). Open a new terminal and check with `node --version`.
+
+**`uv` is not found.** Install it with `pip install uv`, or with the installer from the uv documentation. Open a new
+terminal afterwards.
+
+**`Port 5432 is already in use`.** Another PostgreSQL is running. Stop it, or change the published port in
+`docker-compose.yml` and in `DATABASE_URL` to match.
+
+**`npm ci` fails on Windows with an execution policy error.** Run
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` in PowerShell, or call `npm.cmd ci`.
+
+**The frontend loads, but every request fails.** Check that the backend runs on `http://127.0.0.1:8000`, and that
+`FRONTEND_ORIGIN` in `backend/.env` is the address you open in the browser.
+
+**The first start is slow.** The embedding model is downloaded on first use or at startup (see
+`EMBEDDING_WARM_ON_STARTUP` in `backend/.env.example`). Tectonic downloads LaTeX packages on the first PDF.
+
+## Responsible use
+
+- **Official APIs only.** LinkedIn is used through its official OAuth and publishing API, and only to publish what you
+  approved. There is no browser automation, no auto-comment and no auto-connect.
+- **You approve before anything leaves.** Nothing is sent without your explicit approval in the review screen. Dry-run is
+  the default: `MAIL_DRY_RUN=true` sends nothing.
+- **Recipients are never guessed.** An address comes from the job page or from you.
+- **Grounded content.** A claim that cannot be traced to your master CV or knowledge base is flagged for you to fix
+  before anything is prepared for sending.
+- **Job boards and web sources.** The application does not log in to any job board or site, and does not try to bypass
+  access controls. You are responsible for checking the terms of use of each job board and site you point it at, and for
+  complying with them. Automated access to job boards can be against their terms even for public pages, and rate limits
+  apply: keep runs small and infrequent.
+- **Your terms.** You are responsible for complying with the terms of every service you connect (the LLM provider, search,
+  LinkedIn, GitHub, your mail provider), and with the data protection law that applies to your personal data. The
+  software does not do that compliance for you.
+- **Your data stays yours.** The data you enter is stored in your own database. Some of it is sent to the services
+  listed in the Architecture section (for example, the content of a prompt goes to the LLM provider). Read the
+  configuration section before you connect an account.
+
+## Contributing, conduct, security
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to work on the project, and the rules that cannot be relaxed.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md): the Contributor Covenant.
+- [SECURITY.md](SECURITY.md): how to report a vulnerability privately.
+
+## Technical reference
+
+The sections below describe the design in detail: configuration, data flows, the graphs, the background runs, the watch,
+sending, and the frontend. They are kept for contributors.
 
 ## Configuration: two .env files
 
@@ -97,7 +349,7 @@ Example, with `curl` and a token in `$TOKEN`:
 ```bash
 RUN=$(curl -s -X POST http://localhost:8000/applications \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"job_title":"ML Intern","job_text":"...","recipient_email":"hr@acme.com"}' | jq -r .run_id)
+  -d '{"job_title":"ML Intern","job_text":"...","recipient_email":"hr@acme.example"}' | jq -r .run_id)
 STATUS_URL=http://localhost:8000/applications/preparations/$RUN
 until curl -s "$STATUS_URL" -H "Authorization: Bearer $TOKEN" \
   | jq -e '.status == "awaiting_review" or .status == "closed" or .status == "failed"' > /dev/null; do sleep 3; done
@@ -359,10 +611,13 @@ and applications are never purged by this job.
 to it (profile, knowledge, runs, results, applications, messages, tokens, checkpoints), in one transaction. Another user's
 data is untouched. A wrong password removes nothing.
 
-**Not yet wired.** The watch cannot be run from the API until its background run (`POST /watch/runs`) and the new profile
-fields (regions, languages, offer type) are wired; both need schema migrations, see
-`docs/adr/0003-watch-graph-streams-retention.md`. The synchronous `POST /watch/run` was removed: it bypassed the run
-pattern (no status, no heartbeat, one model call per result). Results already stored are still listed by `GET /watch/results`.
+**Background runs.** `POST /watch/runs` returns `202` with an unguessable `run_id` at once. Follow it with
+`GET /watch/runs/{run_id}` (status, step, `stalled`, and the result when done) or with the progress stream. One watch
+per account runs at a time (`409` otherwise). A run whose process died is resumed from its checkpoint at startup, or
+failed with an instruction when it has none. Results are listed with `GET /watch/results?kind=job|cert&min_score=&verified=&limit=&offset=`
+and removed one by one with `DELETE /watch/results/{id}`. Each result says whether its full page was read (`fetched`) and
+carries the `unverified` flag when it was judged on the search snippet only. The synchronous `POST /watch/run` was
+removed in favour of this run; see `docs/adr/0005-watch-runs-retention-and-provenance.md`.
 
 ## Sending email
 
@@ -527,13 +782,6 @@ Still not done:
 `FRONTEND_URL` and `CORS_ORIGINS` were replaced by `FRONTEND_ORIGIN`, a single origin without a path. Settings ignores
 unknown variables, so the application logs a warning at startup when one of the retired names is set in the
 environment or in `backend/.env`.
-
-## Responsible use
-
-- Only the official LinkedIn API is used. There is no browser automation, no auto-comment and no auto-connect.
-- Nothing is emailed without your explicit approval, and approval is refused if any claim in the CV or the email
-  cannot be traced to your master CV.
-- You are responsible for complying with the terms of every service you connect.
 
 ## Development
 

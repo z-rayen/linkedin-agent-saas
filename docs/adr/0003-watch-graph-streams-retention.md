@@ -1,6 +1,8 @@
 # ADR 0003: The watch graph, progress streams and retention
 
-Status: proposed for the database part. The graph, the stream tickets, the retention purge and the deletion of an account
+Status: the database part is implemented by ADR 0005 (migrations 0011 and 0012; the numbering below is superseded).
+
+Status of the original proposal: proposed for the database part. The graph, the stream tickets, the retention purge and the deletion of an account
 are implemented and tested. The two schema changes below (migrations `0010` and `0011`) and the wiring of the watch to
 the database are **waiting for the owner's go**. No migration has been written or applied for them.
 
