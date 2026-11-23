@@ -16,7 +16,7 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "python-jose>=3.5,<4",
     "bcrypt==4.1.2",
-    "cryptography>=43,<50",
+    "cryptography>=43,<51",
     "httpx>=0.28.1,<0.29",
     "beautifulsoup4>=4.13,<5",
     "fastembed>=0.9.1,<0.10",
